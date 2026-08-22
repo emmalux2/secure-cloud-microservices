@@ -1,7 +1,7 @@
 # SecureCloud
 A two-microservice project that shows how to build, secure, deploy, and monitor a real cloud application written so a beginner can follow every step[cite: 1].
 
-## What's inside?
+## What's iinside?h
 - **auth-service**: logs users in/out and hands out digital "wristbands" (JWT tokens) that prove who you are[cite: 1].
 - **resource-service**: a small notes API that only lets you in if you have a valid wristband[cite: 1].
 
