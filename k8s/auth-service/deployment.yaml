@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: secure-cloud
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: auth-service }
+  template:
+    metadata:
+      labels: { app: auth-service }
+    spec:
+      serviceAccountName: auth-service-sa
+      containers:
+        - name: auth-service
+          image: <ECR_REGISTRY>/auth-service:latest
+          ports: [{ containerPort: 4000 }]
+          envFrom:
+            - secretRef: { name: auth-service-secrets }
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 4000 }
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet: { path: /healthz, port: 4000 }
+            initialDelaySeconds: 5

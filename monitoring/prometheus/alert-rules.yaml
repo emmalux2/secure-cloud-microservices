@@ -1,0 +1,24 @@
+groups:
+  - name: security-alerts
+    rules:
+      - alert: HighFailedLoginRate
+        expr: sum(rate(http_requests_total{route="/auth/login", status="401"}[5m])) > 5
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Possible brute-force attack on auth-service"
+          description: "More than 5 failed logins/sec for 2 minutes."
+
+      - alert: HighErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Elevated 5xx error rate"
+
+      - alert: PodCrashLooping
+        expr: increase(kube_pod_container_status_restarts_total{namespace="secure-cloud"}[15m]) > 3
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Pod is crash-looping"

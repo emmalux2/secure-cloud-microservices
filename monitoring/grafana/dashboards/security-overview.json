@@ -1,0 +1,9 @@
+{
+  "title": "SecureCloud Security Overview",
+  "panels": [
+    { "title": "Failed logins / min", "type": "timeseries", "targets": [{ "expr": "rate(http_requests_total{route=\"/auth/login\",status=\"401\"}[1m])" }] },
+    { "title": "5xx error rate", "type": "timeseries", "targets": [{ "expr": "rate(http_requests_total{status=~\"5..\"}[1m])" }] },
+    { "title": "Request latency p95", "type": "timeseries", "targets": [{ "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))" }] },
+    { "title": "Pod restarts", "type": "stat", "targets": [{ "expr": "sum(kube_pod_container_status_restarts_total{namespace=\"secure-cloud\"})" }] }
+  ]
+}

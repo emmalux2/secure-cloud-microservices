@@ -1,0 +1,26 @@
+version: "3.9"
+services:
+  auth-service:
+    build: ./services/auth-service
+    ports: ["4000:4000"]
+    environment:
+      JWT_ACCESS_SECRET: dev-only-change-me
+      JWT_REFRESH_SECRET: dev-only-change-me-too
+      DATABASE_URL: postgres://postgres:postgres@auth-db:5432/authdb
+    depends_on: [auth-db]
+
+  resource-service:
+    build: ./services/resource-service
+    ports: ["8000:8000"]
+    environment:
+      JWT_ACCESS_SECRET: dev-only-change-me
+
+  auth-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: authdb
+    volumes: ["auth-db-data:/var/lib/postgresql/data"]
+
+volumes:
+  auth-db-data:

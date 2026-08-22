@@ -1,0 +1,16 @@
+route:
+  receiver: "email-oncall"
+  group_by: ["alertname"]
+  group_wait: 30s
+  repeat_interval: 4h
+
+receivers:
+  - name: "email-oncall"
+    email_configs:
+      - to: "your-email@example.com"
+        from: "alerts@securecloud.example.com"
+        smarthost: "email-smtp.us-east-1.amazonaws.com:587"
+        auth_username: "${SES_SMTP_USER}"
+        auth_password: "${SES_SMTP_PASSWORD}"
+        require_tls: true
+        send_resolved: true

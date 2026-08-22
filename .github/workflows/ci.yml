@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test-auth:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: services/auth-service/package-lock.json
+      - run: npm ci
+        working-directory: services/auth-service
+      - run: npm test
+        working-directory: services/auth-service
+      - name: Dependency audit
+        run: npm audit --audit-level=critical || true
+        working-directory: services/auth-service
+
+  test-resource:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: services/resource-service/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt httpx pytest
+        working-directory: services/resource-service
+      - name: Run Pytest
+        run: python -m pytest
+        working-directory: services/resource-service
+      - name: Dependency audit
+        run: pip install pip-audit && pip-audit -r requirements.txt || true
+        working-directory: services/resource-service
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript, python
+      - uses: github/codeql-action/analyze@v3
+
+  notify-on-failure:
+    needs: [test-auth, test-resource, codeql]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install boto3 for notification script
+        run: pip install boto3
+      - name: Send failure email
+        run: python alerts/notify.py --event "CI_FAILURE" --repo "${{ github.repository }}" --run "${{ github.run_id }}"
+        env:
+          SES_SENDER: ${{ secrets.SES_SENDER }}
+          SES_RECIPIENT: ${{ secrets.SES_RECIPIENT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-east-1
