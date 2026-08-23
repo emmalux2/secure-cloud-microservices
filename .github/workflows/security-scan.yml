@@ -28,5 +28,4 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL
-          skip-dirs: 'app/node_modules'  # Suppresses deep node_modules logging
-          args: --skip-version-check     # Suppresses Trivy CLI version update notice
+          scanners: vuln
