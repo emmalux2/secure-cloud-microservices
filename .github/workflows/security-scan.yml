@@ -29,3 +29,5 @@ jobs:
           vuln-type: os,library
           severity: CRITICAL
           scanners: vuln
+          hide-progress: 'true'
+          skip-dirs: '**/node_modules,usr/local/lib/node_modules,opt/yarn-v1.22.22'
