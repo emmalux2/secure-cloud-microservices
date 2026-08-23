@@ -1,9 +1,13 @@
+# Stage 1: Build Dependencies
 FROM python:3.12-slim AS builder
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --default-timeout=1000 --retries 10 --user -r requirements.txt
 
+# Stage 2: Runtime Image
 FROM python:3.12-slim
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 RUN useradd -m appuser
 WORKDIR /app
 COPY --from=builder /root/.local /home/appuser/.local

@@ -1,15 +1,16 @@
+# Stage 1: Build dependencies
 FROM node:20-alpine AS builder
+RUN apk update && apk upgrade --no-cache
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --only=production
 
+# Stage 2: Runtime image
 FROM node:20-alpine
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN apk update && apk upgrade --no-cache
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
-COPY src ./src
-COPY package.json ./
-USER appuser
+COPY . .
+USER node
 EXPOSE 4000
-HEALTHCHECK CMD wget -qO- http://localhost:4000/healthz || exit 1
 CMD ["node", "src/index.js"]
