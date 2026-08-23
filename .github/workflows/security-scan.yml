@@ -16,14 +16,15 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Scan Filesystem with Trivy
+      - name: Scan Application Directory with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
-          scan-ref: 'services/${{ matrix.service }}/app'
+          scan-ref: 'services/${{ matrix.service }}'
           format: table
           exit-code: 1
           ignore-unfixed: true
           severity: CRITICAL
           scanners: vuln
           hide-progress: 'true'
+          skip-dirs: '**/node_modules'
