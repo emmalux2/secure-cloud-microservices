@@ -7,20 +7,24 @@ on:
     branches: [main]
 
 jobs:
-  container-scan:
+  trivy-scan:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, resource-service]
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Build Docker Image
-        run: docker build -t resource-service:latest ./services/resource-service
+      - name: Build Local Image
+        run: docker build -t ${{ matrix.service }}:scan services/${{ matrix.service }}
 
-      - name: Run Trivy vulnerability scanner
+      - name: Scan Image with Trivy
         uses: aquasecurity/trivy-action@v0.28.0
         with:
-          image-ref: 'resource-service:latest'
-          format: 'table'
-          exit-code: '0'
+          image-ref: ${{ matrix.service }}:scan
+          format: table
+          exit-code: 1
           ignore-unfixed: true
-          vuln-type: 'os,library'
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
