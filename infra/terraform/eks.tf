@@ -1,4 +1,7 @@
+data "aws_caller_identity" "current" {}
+
 module "eks" {
+  #checkov:skip=CKV_TF_1:Using official terraform registry version
   source          = "terraform-aws-modules/eks/aws"
   version         = "20.24.0"
   cluster_name    = "secure-cloud-cluster"
@@ -26,6 +29,22 @@ module "eks" {
 }
 
 resource "aws_kms_key" "eks" {
-  description         = "EKS secret encryption key"
-  enable_key_rotation = true
+  description             = "EKS secret encryption key"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      }
+    ]
+  })
 }

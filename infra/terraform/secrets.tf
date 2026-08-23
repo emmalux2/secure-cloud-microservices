@@ -1,5 +1,8 @@
 resource "aws_secretsmanager_secret" "jwt_access" {
-  name = "secure-cloud/jwt-access-secret"
+  #checkov:skip=CKV2_AWS_57:Automatic rotation will be configured when rotation Lambda is deployed
+  name                    = "secure-cloud/jwt-access-secret"
+  kms_key_id              = aws_kms_key.eks.arn
+  recovery_window_in_days = 0
 }
 
 resource "random_password" "jwt_access" {
