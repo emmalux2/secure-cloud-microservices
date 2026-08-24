@@ -14,7 +14,7 @@ spec:
       serviceAccountName: auth-service-sa
       containers:
         - name: auth-service
-          image: <ECR_REGISTRY>/auth-service:latest
+          image: 797776210271.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest
           ports: [{ containerPort: 4000 }]
           envFrom:
             - secretRef: { name: auth-service-secrets }

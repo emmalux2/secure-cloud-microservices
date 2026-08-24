@@ -29,7 +29,7 @@ module "eks" {
 }
 
 resource "aws_kms_key" "eks" {
-  description             = "EKS secret encryption key"
+  description             = "EKS secret and WAF log encryption key"
   enable_key_rotation     = true
   deletion_window_in_days = 7
 
@@ -44,6 +44,26 @@ resource "aws_kms_key" "eks" {
         }
         Action   = "kms:*"
         Resource = "*"
+      },
+      {
+        Sid    = "Allow CloudWatch Logs Encryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${var.aws_region}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt*",
+          "kms:Decrypt*",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:aws-waf-logs-*"
+          }
+        }
       }
     ]
   })

@@ -4,7 +4,7 @@ metadata:
   name: auth-service-sa
   namespace: secure-cloud
   annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/auth-service-irsa
+    eks.amazonaws.com/role-arn: arn:aws:iam::<797776210271>:role/auth-service-irsa
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
