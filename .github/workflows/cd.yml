@@ -15,9 +15,6 @@ jobs:
   deploy:
     name: Build & Deploy Infrastructure & Services
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
       - name: Checkout Repository
@@ -77,17 +74,11 @@ jobs:
         run: |
           kubectl rollout status deployment/auth-service -n secure-cloud --timeout=300s
 
-      - name: Configure AWS Credentials for Failure Notification
-        if: failure()
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
-          aws-region: us-east-1
-
       - name: Notify on deploy failure
         if: failure()
-        run: python alerts/notify.py --event "DEPLOY_FAILURE" --repo "${{ github.repository }}" --run "${{ github.run_id }}"
         env:
           AWS_REGION: us-east-1
           SES_SENDER: ${{ secrets.SES_SENDER }}
           SES_RECIPIENT: ${{ secrets.SES_RECIPIENT }}
+        run: |
+          python alerts/notify.py --event "DEPLOY_FAILURE" --repo "${{ github.repository }}" --run "${{ github.run_id }}"

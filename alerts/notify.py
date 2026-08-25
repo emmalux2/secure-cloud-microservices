@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import boto3
@@ -27,20 +28,18 @@ def send_email(subject, body):
         sys.exit(1)
 
 if __name__ == '__main__':
-    event = "DEPLOY_FAILURE"
-    repo = os.getenv('GITHUB_REPOSITORY', 'emmalux2/secure-cloud-microservices')
-    run_id = os.getenv('GITHUB_RUN_ID', 'unknown')
+    parser = argparse.ArgumentParser(description="Send pipeline failure notifications via AWS SES.")
+    parser.add_argument('--event', default="DEPLOY_FAILURE", help="Event name")
+    parser.add_argument('--repo', default=os.getenv('GITHUB_REPOSITORY', 'emmalux2/secure-cloud-microservices'), help="GitHub repository")
+    parser.add_argument('--run', default=os.getenv('GITHUB_RUN_ID', 'unknown'), help="GitHub action run ID")
 
-    # Parse command line flags if provided
-    for i in range(len(sys.argv)):
-        if sys.argv[i] == "--event" and i + 1 < len(sys.argv):
-            event = sys.argv[i + 1]
-        elif sys.argv[i] == "--repo" and i + 1 < len(sys.argv):
-            repo = sys.argv[i + 1]
-        elif sys.argv[i] == "--run" and i + 1 < len(sys.argv):
-            run_id = sys.argv[i + 1]
+    args = parser.parse_args()
 
-    subject = f"[{event}] Deployment Failed - {repo}"
-    body = f"The automated CD pipeline for repository '{repo}' encountered an error.\n\nGitHub Action Run ID: {run_id}\nView Execution Logs: https://github.com/{repo}/actions/runs/{run_id}"
+    subject = f"[{args.event}] Deployment Failed - {args.repo}"
+    body = (
+        f"The automated CD pipeline for repository '{args.repo}' encountered an error.\n\n"
+        f"GitHub Action Run ID: {args.run}\n"
+        f"View Execution Logs: https://github.com/{args.repo}/actions/runs/{args.run}"
+    )
 
     send_email(subject, body)

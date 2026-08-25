@@ -1,77 +1,99 @@
-name: CI
+name: Continuous Delivery
 
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
+    branches:
+      - main
+      - dev
+      - 'feature/*'
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  test-auth:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: services/auth-service/package-lock.json
-      - run: npm ci
-        working-directory: services/auth-service
-      - run: npm test
-        working-directory: services/auth-service
-      - name: Dependency audit
-        run: npm audit --audit-level=critical || true
-        working-directory: services/auth-service
-
-  test-resource:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: services/resource-service/requirements.txt
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt httpx pytest
-        working-directory: services/resource-service
-      - name: Run Pytest
-        run: python -m pytest
-        working-directory: services/resource-service
-      - name: Dependency audit
-        run: pip install pip-audit && pip-audit -r requirements.txt || true
-        working-directory: services/resource-service
-
-  codeql:
+  deploy:
+    name: Build & Deploy Infrastructure & Services
     runs-on: ubuntu-latest
     permissions:
-      security-events: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
-        with:
-          languages: javascript-typescript, python
-      - uses: github/codeql-action/analyze@v3
+      id-token: write
+      contents: read
 
-  notify-on-failure:
-    needs: [test-auth, test-resource, codeql]
-    if: failure()
-    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install boto3 for notification script
-        run: pip install boto3
-      - name: Send failure email
-        run: python alerts/notify.py --event "CI_FAILURE" --repo "${{ github.repository }}" --run "${{ github.run_id }}"
+          python-version: '3.11'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
+          audience: sts.amazonaws.com
+          aws-region: us-east-1
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, Tag, and Push Auth Service Image
         env:
+          ECR_REGISTRY: 797776210271.dkr.ecr.us-east-1.amazonaws.com
+          ECR_REPOSITORY: auth-service
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./services/auth-service
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init & Apply
+        run: |
+          cd infra/terraform
+          terraform init
+          terraform apply -auto-approve
+
+      - name: Update Kubeconfig
+        run: |
+          aws eks update-kubeconfig --region us-east-1 --name secure-cloud-cluster
+
+      - name: Deploy Kubernetes Manifests
+        run: |
+          kubectl apply -f k8s/rbac.yaml
+          kubectl apply -f k8s/deployment.yaml
+
+      - name: Verify Deployment Rollout
+        run: |
+          kubectl rollout status deployment/auth-service -n secure-cloud --timeout=300s
+
+      - name: Configure AWS Credentials for Failure Notification
+        if: failure()
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
+          audience: sts.amazonaws.com
+          aws-region: us-east-1
+
+      - name: Notify on deploy failure
+        if: failure()
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
           SES_SENDER: ${{ secrets.SES_SENDER }}
           SES_RECIPIENT: ${{ secrets.SES_RECIPIENT }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: us-east-1
+        run: |
+          python alerts/notify.py --event "DEPLOY_FAILURE" --repo "${{ github.repository }}" --run "${{ github.run_id }}"
