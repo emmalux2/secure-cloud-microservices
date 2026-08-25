@@ -7,6 +7,10 @@ on:
       - dev
       - 'feature/*'
 
+# Top-level environment variables (Suppresses Node 20 runtime deprecation warnings)
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+
 permissions:
   id-token: write
   contents: read
