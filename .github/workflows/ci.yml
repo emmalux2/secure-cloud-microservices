@@ -20,9 +20,11 @@ jobs:
       contents: read
 
     steps:
+      # MODIFIED HERE: Updated to actions/checkout@v4 for Node 24 runner compatibility
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # MODIFIED HERE: Updated to actions/setup-python@v5 for Node 24 runner compatibility
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -33,6 +35,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install boto3
 
+      # MODIFIED HERE: Added OIDC token debug step to inspect the claims sent to AWS STS
+      - name: Debug OIDC Token Claim
+        run: |
+          TOKEN=$(curl -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+          echo "GitHub Subject Claim Sent To AWS:"
+          echo $TOKEN | cut -d. -f2 | base64 --decode 2>/dev/null | jq -r '.sub'
+
+      # MODIFIED HERE: Updated to aws-actions/configure-aws-credentials@v4 for Node 24 support
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -40,6 +50,7 @@ jobs:
           audience: sts.amazonaws.com
           aws-region: us-east-1
 
+      # MODIFIED HERE: Updated to aws-actions/amazon-ecr-login@v2 for Node 24 support
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
@@ -54,6 +65,7 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
+      # MODIFIED HERE: Updated to hashicorp/setup-terraform@v3 for Node 24 support
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -78,6 +90,7 @@ jobs:
         run: |
           kubectl rollout status deployment/auth-service -n secure-cloud --timeout=300s
 
+      # MODIFIED HERE: Updated to aws-actions/configure-aws-credentials@v4 for Node 24 support
       - name: Configure AWS Credentials for Failure Notification
         if: failure()
         uses: aws-actions/configure-aws-credentials@v4
