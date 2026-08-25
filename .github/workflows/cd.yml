@@ -4,11 +4,9 @@ on:
   push:
     branches: [ "main" ]
 
-# Set environment variables globally across all jobs and steps
 env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
 
-# Global permissions required for OIDC token minting
 permissions:
   id-token: write
   contents: read
@@ -35,6 +33,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
           aws-region: us-east-1
+          audience: sts.amazonaws.com
           role-skip-session-tagging: true
 
       - name: Verify AWS Connection
@@ -44,7 +43,6 @@ jobs:
       - name: Deploy Microservices
         run: |
           echo "Executing Continuous Delivery tasks..."
-          # Insert your microservices deployment steps here
 
       - name: Notify on Deploy Failure
         if: failure()
