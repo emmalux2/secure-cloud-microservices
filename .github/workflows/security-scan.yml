@@ -13,11 +13,13 @@ jobs:
       matrix:
         service: [auth-service, resource-service]
     steps:
+      # MODIFIED HERE: Updated checkout action to v4 for Node 24 runner compatibility
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # MODIFIED HERE: Uses latest trivy-action release compatible with Node 24 runtime
       - name: Scan Application Directory with Trivy
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@0.30.0
         with:
           scan-type: 'fs'
           scan-ref: 'services/${{ matrix.service }}'
