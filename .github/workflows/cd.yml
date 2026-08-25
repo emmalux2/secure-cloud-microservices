@@ -4,6 +4,10 @@ on:
   push:
     branches: [ "main" ]
 
+# Set environment variables globally across all jobs and steps
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+
 # Global permissions required for OIDC token minting
 permissions:
   id-token: write
@@ -27,7 +31,7 @@ jobs:
           pip install boto3
 
       - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
           aws-region: us-east-1
@@ -40,7 +44,7 @@ jobs:
       - name: Deploy Microservices
         run: |
           echo "Executing Continuous Delivery tasks..."
-          # Add your docker build/push, helm, or kubectl commands here
+          # Insert your microservices deployment steps here
 
       - name: Notify on Deploy Failure
         if: failure()
