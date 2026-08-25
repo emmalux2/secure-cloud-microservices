@@ -2,10 +2,7 @@ name: Continuous Delivery
 
 on:
   push:
-    branches: [ "main" ]
-
-env:
-  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+    branches: ["main"]
 
 permissions:
   id-token: write
@@ -14,41 +11,68 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python Environment
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install boto3
 
+      # Authenticate GitHub Actions with AWS using OIDC
       - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
           aws-region: us-east-1
           audience: sts.amazonaws.com
           role-skip-session-tagging: true
 
+      # Test 1: Verify that GitHub successfully assumed the AWS IAM role
       - name: Verify AWS Connection
         run: |
           aws sts get-caller-identity
 
+      # Test 2: Verify that Python/Boto3 can see the temporary AWS credentials
+      - name: Verify Boto3 Credentials
+        run: |
+          python - <<'PY'
+          import boto3
+
+          session = boto3.Session()
+          credentials = session.get_credentials()
+
+          if credentials is None:
+              raise RuntimeError("Boto3 cannot find AWS credentials")
+
+          print("Boto3 credentials detected")
+          print(f"Credential method: {credentials.method}")
+          print(f"AWS region: {session.region_name}")
+          PY
+
+      # Deployment
       - name: Deploy Microservices
         run: |
           echo "Executing Continuous Delivery tasks..."
+          # Insert your deployment commands here
 
+      # Send email if deployment fails
       - name: Notify on Deploy Failure
-        if: failure()
+        if: ${{ failure() }}
         env:
+          AWS_DEFAULT_REGION: us-east-1
           AWS_REGION: us-east-1
           SES_SENDER: ${{ secrets.SES_SENDER }}
           SES_RECIPIENT: ${{ secrets.SES_RECIPIENT }}
         run: |
-          python alerts/notify.py --event "DEPLOY_FAILURE" --repo "${{ github.repository }}" --run "${{ github.run_id }}"
+          python alerts/notify.py \
+            --event "DEPLOY_FAILURE" \
+            --repo "${{ github.repository }}" \
+            --run "${{ github.run_id }}"
