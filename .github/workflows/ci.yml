@@ -1,104 +1,95 @@
-name: Continuous Delivery
+name: Continuous Integration
 
 on:
   push:
-    branches:
-      - main
-      - dev
-      - 'feature/*'
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
+# Permissions required for GitHub OIDC authentication with AWS
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  deploy:
-    name: Build & Deploy Infrastructure & Services
+  build-and-push:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v5
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
-          python-version: '3.11'
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install boto3
-
-      # FIXED: Safely decodes OIDC JWT payload without breaking Linux base64 decoder
-      - name: Debug OIDC Token Claim
-        run: |
-          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-          echo "GitHub Subject Claim Sent To AWS:"
-          echo "$TOKEN" | jq -R 'split(".") | .[1] | @base64d | fromjson | .sub'
-
-      - name: Configure AWS Credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
         with:
-          role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
-          aws-region: us-east-1
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/devops-capstone:latest
 
-      - name: Log in to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+  terraform-and-plan:
+    needs: build-and-push
+    runs-on: ubuntu-latest
 
-      - name: Build, Tag, and Push Auth Service Image
-        env:
-          ECR_REGISTRY: 797776210271.dkr.ecr.us-east-1.amazonaws.com
-          ECR_REPOSITORY: auth-service
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./services/auth-service
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.0
 
-      - name: Terraform Init & Apply
-        run: |
-          cd infra/terraform
-          terraform init
-          terraform apply -auto-approve
-
-      - name: Update Kubeconfig
-        run: |
-          aws eks update-kubeconfig --region us-east-1 --name secure-cloud-cluster
-
-      - name: Deploy Kubernetes Manifests
-        run: |
-          kubectl apply -f k8s/rbac.yaml
-          kubectl apply -f k8s/deployment.yaml
-
-      - name: Verify Deployment Rollout
-        run: |
-          kubectl rollout status deployment/auth-service -n secure-cloud --timeout=300s
-
-      - name: Configure AWS Credentials for Failure Notification
-        if: failure()
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
           aws-region: us-east-1
+          audience: sts.amazonaws.com
+          role-skip-session-tagging: true
 
-      - name: Notify on deploy failure
-        if: failure()
-        env:
-          AWS_REGION: us-east-1
-          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
-          SES_SENDER: ${{ secrets.SES_SENDER }}
-          SES_RECIPIENT: ${{ secrets.SES_RECIPIENT }}
+      - name: Verify AWS Identity
         run: |
-          python alerts/notify.py --event "DEPLOY_FAILURE" --repo "${{ github.repository }}" --run "${{ github.run_id }}"
+          aws sts get-caller-identity
+
+      - name: Verify Boto3 Credentials
+        run: |
+          python - <<'PY'
+          import boto3
+
+          session = boto3.Session()
+          credentials = session.get_credentials()
+
+          if credentials is None:
+              raise RuntimeError("Boto3 cannot find AWS credentials")
+
+          print("Boto3 credentials detected")
+          print(f"Credential method: {credentials.method}")
+          print(f"AWS region: {session.region_name}")
+          PY
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./terraform
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ./terraform
+
+      - name: Terraform Plan
+        run: terraform plan
+        working-directory: ./terraform
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve
+        working-directory: ./terraform

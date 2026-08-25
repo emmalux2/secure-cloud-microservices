@@ -9,25 +9,24 @@ on:
 jobs:
   trivy-scan:
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         service: [auth-service, resource-service]
-    steps:
-      # MODIFIED HERE: Updated checkout action to v4 for Node 24 runner compatibility
-      - name: Checkout Code
-        uses: actions/checkout@v4
 
-      # MODIFIED HERE: Uses latest trivy-action release compatible with Node 24 runtime
-      #FIXED: Added 'v' prefix and updated tag to v0.36.0
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
       - name: Scan Application Directory with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          scan-type: 'fs'
-          scan-ref: 'services/${{ matrix.service }}'
+          scan-type: fs
+          scan-ref: services/${{ matrix.service }}
           format: table
           exit-code: 1
           ignore-unfixed: true
           severity: CRITICAL
           scanners: vuln
-          hide-progress: 'true'
-          skip-dirs: '**/node_modules'
+          hide-progress: true
+          skip-dirs: "**/node_modules"
