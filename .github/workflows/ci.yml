@@ -47,7 +47,6 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
-          audience: sts.amazonaws.com
           aws-region: us-east-1
 
       # MODIFIED HERE: Updated to aws-actions/amazon-ecr-login@v2 for Node 24 support
@@ -96,7 +95,6 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
-          audience: sts.amazonaws.com
           aws-region: us-east-1
 
       - name: Notify on deploy failure
