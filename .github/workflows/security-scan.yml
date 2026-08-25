@@ -18,8 +18,9 @@ jobs:
         uses: actions/checkout@v4
 
       # MODIFIED HERE: Uses latest trivy-action release compatible with Node 24 runtime
+      #FIXED: Added 'v' prefix and updated tag to v0.36.0
       - name: Scan Application Directory with Trivy
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: 'services/${{ matrix.service }}'
