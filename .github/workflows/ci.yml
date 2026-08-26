@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: ["main"]
 
-# Permissions required for GitHub OIDC authentication with AWS
 permissions:
   id-token: write
   contents: read
@@ -14,6 +13,12 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        service:
+          - auth-service
+          - resource-service
 
     steps:
       - name: Checkout Code
@@ -31,10 +36,10 @@ jobs:
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./services/${{ matrix.service }}
+          file: ./services/${{ matrix.service }}/Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/devops-capstone:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
 
   terraform-and-plan:
     needs: build-and-push
@@ -60,22 +65,6 @@ jobs:
       - name: Verify AWS Identity
         run: |
           aws sts get-caller-identity
-
-      - name: Verify Boto3 Credentials
-        run: |
-          python - <<'PY'
-          import boto3
-
-          session = boto3.Session()
-          credentials = session.get_credentials()
-
-          if credentials is None:
-              raise RuntimeError("Boto3 cannot find AWS credentials")
-
-          print("Boto3 credentials detected")
-          print(f"Credential method: {credentials.method}")
-          print(f"AWS region: {session.region_name}")
-          PY
 
       - name: Terraform Init
         run: terraform init
