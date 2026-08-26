@@ -1,84 +1,81 @@
-name: Continuous Integration
+name: CI Pipeline
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
+
   pull_request:
-    branches: ["main"]
+    branches:
+      - main
 
 permissions:
-  id-token: write
   contents: read
+  id-token: write
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        service:
-          - auth-service
-          - resource-service
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./services/${{ matrix.service }}
-          file: ./services/${{ matrix.service }}/Dockerfile
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
-
-  terraform-and-plan:
-    needs: build-and-push
+  build-test-scan:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Setup Terraform
+      - name: Debug OIDC Claims
+        uses: github/actions-oidc-debugger@main
+        with:
+          audience: sts.amazonaws.com
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        working-directory: services/auth-service
+        run: npm ci
+
+      - name: Run tests
+        working-directory: services/auth-service
+        run: npm test
+
+      - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.5.0
 
-      - name: Configure AWS Credentials (OIDC)
+      - name: Terraform Format Check
+        working-directory: terraform
+        run: terraform fmt -check
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
           aws-region: us-east-1
-          audience: sts.amazonaws.com
-          role-skip-session-tagging: true
 
-      - name: Verify AWS Identity
-        run: |
-          aws sts get-caller-identity
-
-      - name: Terraform Init
-        run: terraform init
-        working-directory: ./terraform
-
-      - name: Terraform Validate
-        run: terraform validate
-        working-directory: ./terraform
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
 
       - name: Terraform Plan
+        working-directory: terraform
         run: terraform plan
-        working-directory: ./terraform
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/devops-capstone:latest
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        working-directory: terraform
         run: terraform apply -auto-approve
-        working-directory: ./terraform
