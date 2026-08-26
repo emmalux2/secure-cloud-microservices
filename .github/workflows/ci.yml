@@ -13,97 +13,118 @@ permissions:
 
 jobs:
   oidc-debug:
-    name: Debug GitHub OIDC Token
+    name: Debug GitHub OIDC
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Get GitHub OIDC token and display claims
+      - name: Get and inspect OIDC token
         shell: bash
         run: |
           set -e
 
-          echo "========================================="
-          echo "GitHub OIDC Debug Information"
-          echo "========================================="
+          echo "=============================================="
+          echo "GITHUB OIDC DEBUG"
+          echo "=============================================="
+
+          echo "Repository: ${GITHUB_REPOSITORY}"
+          echo "Owner:      ${GITHUB_REPOSITORY_OWNER}"
+          echo "Ref:        ${GITHUB_REF}"
+          echo "Event:      ${GITHUB_EVENT_NAME}"
 
           echo ""
-          echo "Repository:"
-          echo "${GITHUB_REPOSITORY}"
+          echo "Requesting GitHub OIDC token..."
 
-          echo ""
-          echo "Repository owner:"
-          echo "${GITHUB_REPOSITORY_OWNER}"
-
-          echo ""
-          echo "Branch:"
-          echo "${GITHUB_REF}"
-
-          echo ""
-          echo "Event:"
-          echo "${GITHUB_EVENT_NAME}"
-
-          echo ""
-          echo "Requesting OIDC token..."
-
-          OIDC_TOKEN=$(curl -sS \
+          RESPONSE=$(curl -sS \
             -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
-            | jq -r '.value')
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
+
+          OIDC_TOKEN=$(echo "$RESPONSE" | jq -r '.value')
 
           if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ]; then
-            echo "ERROR: Failed to obtain OIDC token."
+            echo ""
+            echo "ERROR: GitHub did not return an OIDC token."
+            echo ""
+            echo "Response:"
+            echo "$RESPONSE"
             exit 1
           fi
 
-          echo "OIDC token successfully obtained."
+          echo "OIDC token obtained successfully."
 
           echo ""
-          echo "========================================="
-          echo "OIDC TOKEN CLAIMS"
-          echo "========================================="
+          echo "Decoding token..."
 
           PAYLOAD=$(echo "$OIDC_TOKEN" | cut -d '.' -f 2)
 
+          # Convert Base64URL to standard Base64
           PAYLOAD=$(printf '%s' "$PAYLOAD" | tr '_-' '/+')
 
+          # Add required Base64 padding
           case $((${#PAYLOAD} % 4)) in
-            2) PAYLOAD="${PAYLOAD}==";;
-            3) PAYLOAD="${PAYLOAD}=";;
+            2)
+              PAYLOAD="${PAYLOAD}=="
+              ;;
+            3)
+              PAYLOAD="${PAYLOAD}="
+              ;;
           esac
 
-          echo "$PAYLOAD" | base64 -d 2>/dev/null | jq .
+          CLAIMS=$(printf '%s' "$PAYLOAD" | base64 -d 2>/dev/null)
+
+          if [ -z "$CLAIMS" ]; then
+            echo "ERROR: Could not decode OIDC token."
+            exit 1
+          fi
+
+          SUB=$(echo "$CLAIMS" | jq -r '.sub')
+          AUD=$(echo "$CLAIMS" | jq -r '.aud')
+          ISS=$(echo "$CLAIMS" | jq -r '.iss')
+          REPOSITORY=$(echo "$CLAIMS" | jq -r '.repository')
+          REF=$(echo "$CLAIMS" | jq -r '.ref')
 
           echo ""
-          echo "========================================="
-          echo "SUB CLAIM"
-          echo "========================================="
-
-          SUB=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq -r '.sub')
-
-          echo "sub = ${SUB}"
+          echo "=============================================="
+          echo "IMPORTANT OIDC VALUES"
+          echo "=============================================="
 
           echo ""
-          echo "========================================="
-          echo "AUDIENCE CLAIM"
-          echo "========================================="
-
-          AUD=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq -r '.aud')
-
-          echo "aud = ${AUD}"
+          echo "SUB:"
+          echo "$SUB"
 
           echo ""
-          echo "========================================="
-          echo "ISSUER CLAIM"
-          echo "========================================="
+          echo "AUDIENCE:"
+          echo "$AUD"
 
-          ISS=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq -r '.iss')
+          echo ""
+          echo "ISSUER:"
+          echo "$ISS"
 
-          echo "iss = ${ISS}"
+          echo ""
+          echo "REPOSITORY:"
+          echo "$REPOSITORY"
 
-      - name: Test AWS OIDC Authentication
+          echo ""
+          echo "REF:"
+          echo "$REF"
+
+          echo ""
+          echo "=============================================="
+          echo "AWS TRUST POLICY SHOULD MATCH:"
+          echo "=============================================="
+
+          echo ""
+          echo "SUB = $SUB"
+          echo "AUD = $AUD"
+
+          echo ""
+          echo "=============================================="
+          echo "OIDC DEBUG COMPLETE"
+          echo "=============================================="
+
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
@@ -111,4 +132,5 @@ jobs:
 
       - name: Verify AWS identity
         run: |
+          echo "AWS authentication succeeded."
           aws sts get-caller-identity
