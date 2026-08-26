@@ -1,81 +1,114 @@
-name: CI Pipeline
+name: CI Pipeline - OIDC Debug
 
 on:
   push:
     branches:
       - main
 
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
-  build-test-scan:
+  oidc-debug:
+    name: Debug GitHub OIDC Token
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Debug OIDC Claims
-        uses: github/actions-oidc-debugger@main
-        with:
-          audience: sts.amazonaws.com
+      - name: Get GitHub OIDC token and display claims
+        shell: bash
+        run: |
+          set -e
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
+          echo "========================================="
+          echo "GitHub OIDC Debug Information"
+          echo "========================================="
 
-      - name: Install dependencies
-        working-directory: services/auth-service
-        run: npm ci
+          echo ""
+          echo "Repository:"
+          echo "${GITHUB_REPOSITORY}"
 
-      - name: Run tests
-        working-directory: services/auth-service
-        run: npm test
+          echo ""
+          echo "Repository owner:"
+          echo "${GITHUB_REPOSITORY_OWNER}"
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+          echo ""
+          echo "Branch:"
+          echo "${GITHUB_REF}"
 
-      - name: Terraform Format Check
-        working-directory: terraform
-        run: terraform fmt -check
+          echo ""
+          echo "Event:"
+          echo "${GITHUB_EVENT_NAME}"
 
-      - name: Terraform Init
-        working-directory: terraform
-        run: terraform init
+          echo ""
+          echo "Requesting OIDC token..."
 
-      - name: Terraform Validate
-        working-directory: terraform
-        run: terraform validate
+          OIDC_TOKEN=$(curl -sS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | jq -r '.value')
 
-      - name: Configure AWS credentials using OIDC
+          if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ]; then
+            echo "ERROR: Failed to obtain OIDC token."
+            exit 1
+          fi
+
+          echo "OIDC token successfully obtained."
+
+          echo ""
+          echo "========================================="
+          echo "OIDC TOKEN CLAIMS"
+          echo "========================================="
+
+          PAYLOAD=$(echo "$OIDC_TOKEN" | cut -d '.' -f 2)
+
+          PAYLOAD=$(printf '%s' "$PAYLOAD" | tr '_-' '/+')
+
+          case $((${#PAYLOAD} % 4)) in
+            2) PAYLOAD="${PAYLOAD}==";;
+            3) PAYLOAD="${PAYLOAD}=";;
+          esac
+
+          echo "$PAYLOAD" | base64 -d 2>/dev/null | jq .
+
+          echo ""
+          echo "========================================="
+          echo "SUB CLAIM"
+          echo "========================================="
+
+          SUB=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq -r '.sub')
+
+          echo "sub = ${SUB}"
+
+          echo ""
+          echo "========================================="
+          echo "AUDIENCE CLAIM"
+          echo "========================================="
+
+          AUD=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq -r '.aud')
+
+          echo "aud = ${AUD}"
+
+          echo ""
+          echo "========================================="
+          echo "ISSUER CLAIM"
+          echo "========================================="
+
+          ISS=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | jq -r '.iss')
+
+          echo "iss = ${ISS}"
+
+      - name: Test AWS OIDC Authentication
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::797776210271:role/GitHubActionsDeployRole
           aws-region: us-east-1
 
       - name: Verify AWS identity
-        run: aws sts get-caller-identity
-
-      - name: Terraform Plan
-        working-directory: terraform
-        run: terraform plan
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/devops-capstone:latest
-
-      - name: Terraform Apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        working-directory: terraform
-        run: terraform apply -auto-approve
+        run: |
+          aws sts get-caller-identity
