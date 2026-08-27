@@ -62,54 +62,24 @@ jobs:
         run: |
           terraform init -input=false -reconfigure
 
-      - name: Ensure JWT Secret Is In Terraform State
+      - name: Verify Existing JWT Secret
         working-directory: infra/terraform
-        shell: bash
         run: |
-          set -euo pipefail
-
-          SECRET_NAME="secure-cloud/jwt-access-secret"
+          set -e
 
           echo "=========================================="
-          echo "CHECKING AWS SECRETS MANAGER"
+          echo "VERIFYING AWS SECRETS MANAGER"
           echo "=========================================="
 
-          SECRET_ARN=$(aws secretsmanager describe-secret \
-            --secret-id "$SECRET_NAME" \
-            --query 'ARN' \
-            --output text 2>/dev/null || true)
+          aws secretsmanager describe-secret \
+            --secret-id "secure-cloud/jwt-access-secret" \
+            --region us-east-1 \
+            --query '{Name:Name,ARN:ARN}' \
+            --output table
 
-          if [ -z "$SECRET_ARN" ] || [ "$SECRET_ARN" = "None" ]; then
-            echo "Secret does not exist in AWS."
-            echo "Terraform will create the secret."
-          else
-            echo "Secret exists in AWS:"
-            echo "$SECRET_ARN"
-
-            echo "=========================================="
-            echo "CHECKING TERRAFORM STATE"
-            echo "=========================================="
-
-            STATE_RESULT=$(terraform state list 2>/dev/null || true)
-
-            if printf '%s\n' "$STATE_RESULT" | grep -Fxq 'aws_secretsmanager_secret.jwt_access'; then
-              echo "Secret is already managed by Terraform."
-            else
-              echo "Secret is NOT managed by Terraform."
-              echo "Importing existing AWS secret..."
-
-              terraform import \
-                -input=false \
-                aws_secretsmanager_secret.jwt_access \
-                "$SECRET_ARN"
-
-              echo "=========================================="
-              echo "IMPORT COMPLETED"
-              echo "=========================================="
-
-              terraform state show aws_secretsmanager_secret.jwt_access
-            fi
-          fi
+          echo "=========================================="
+          echo "JWT SECRET EXISTS"
+          echo "=========================================="
 
       - name: Terraform Validate
         working-directory: infra/terraform
