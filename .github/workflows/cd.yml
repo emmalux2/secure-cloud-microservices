@@ -16,6 +16,9 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v5
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
       - name: Setup Python Environment
         uses: actions/setup-python@v6
         with:
@@ -35,12 +38,12 @@ jobs:
           audience: sts.amazonaws.com
           role-skip-session-tagging: true
 
-      # Test 1: Verify that GitHub successfully assumed the AWS IAM role
+      # Verify AWS authentication
       - name: Verify AWS Connection
         run: |
           aws sts get-caller-identity
 
-      # Test 2: Verify that Python/Boto3 can see the temporary AWS credentials
+      # Verify Boto3 credentials
       - name: Verify Boto3 Credentials
         run: |
           python - <<'PY'
@@ -57,11 +60,25 @@ jobs:
           print(f"AWS region: {session.region_name}")
           PY
 
-      # Deployment
-      - name: Deploy Microservices
-        run: |
-          echo "Executing Continuous Delivery tasks..."
-          # Insert your deployment commands here
+      # Initialize Terraform
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init -input=false
+
+      # Validate Terraform configuration
+      - name: Terraform Validate
+        working-directory: infra/terraform
+        run: terraform validate
+
+      # Generate Terraform plan
+      - name: Terraform Plan
+        working-directory: infra/terraform
+        run: terraform plan -input=false -out=tfplan
+
+      # Apply Terraform infrastructure
+      - name: Terraform Apply
+        working-directory: infra/terraform
+        run: terraform apply -input=false -auto-approve tfplan
 
       # Send email if deployment fails
       - name: Notify on Deploy Failure
