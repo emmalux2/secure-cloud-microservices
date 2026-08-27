@@ -1,3 +1,4 @@
+```yaml
 name: Continuous Delivery
 
 on:
@@ -63,22 +64,54 @@ jobs:
       # Initialize Terraform
       - name: Terraform Init
         working-directory: infra/terraform
-        run: terraform init -input=false
+        run: |
+          terraform init -input=false -reconfigure
+
+      # Import existing Secrets Manager secret into Terraform state
+      - name: Import Existing JWT Secret
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          SECRET_ARN=$(aws secretsmanager describe-secret \
+            --secret-id "secure-cloud/jwt-access-secret" \
+            --query "ARN" \
+            --output text)
+
+          echo "Existing secret ARN:"
+          echo "$SECRET_ARN"
+
+          if terraform state list | grep -q '^aws_secretsmanager_secret.jwt_access$'; then
+            echo "JWT secret is already present in Terraform state."
+          else
+            echo "Importing existing JWT secret into Terraform state..."
+            terraform import \
+              -input=false \
+              aws_secretsmanager_secret.jwt_access \
+              "$SECRET_ARN"
+          fi
 
       # Validate Terraform configuration
       - name: Terraform Validate
         working-directory: infra/terraform
         run: terraform validate
 
-      # Generate Terraform plan
+      # Generate a fresh Terraform plan
       - name: Terraform Plan
         working-directory: infra/terraform
-        run: terraform plan -input=false -out=tfplan
+        run: |
+          rm -f tfplan
+          terraform plan \
+            -input=false \
+            -out=tfplan
 
-      # Apply Terraform infrastructure
+      # Apply the fresh Terraform plan
       - name: Terraform Apply
         working-directory: infra/terraform
-        run: terraform apply -input=false -auto-approve tfplan
+        run: |
+          terraform apply \
+            -input=false \
+            -auto-approve \
+            tfplan
 
       # Send email if deployment fails
       - name: Notify on Deploy Failure
@@ -93,3 +126,4 @@ jobs:
             --event "DEPLOY_FAILURE" \
             --repo "${{ github.repository }}" \
             --run "${{ github.run_id }}"
+#hhh
