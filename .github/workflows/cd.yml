@@ -18,6 +18,8 @@ jobs:
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
       - name: Setup Python Environment
         uses: actions/setup-python@v6
@@ -45,27 +47,8 @@ jobs:
       # ============================================================
       - name: Verify AWS Connection
         run: |
-          echo "Checking AWS identity..."
+          echo "AWS identity:"
           aws sts get-caller-identity
-
-      # ============================================================
-      # VERIFY BOTO3
-      # ============================================================
-      - name: Verify Boto3 Credentials
-        run: |
-          python - <<'PY'
-          import boto3
-
-          session = boto3.Session()
-          credentials = session.get_credentials()
-
-          if credentials is None:
-              raise RuntimeError("Boto3 cannot find AWS credentials")
-
-          print("Boto3 credentials detected")
-          print(f"Credential method: {credentials.method}")
-          print(f"AWS region: {session.region_name}")
-          PY
 
       # ============================================================
       # TERRAFORM INIT
@@ -78,30 +61,7 @@ jobs:
             -reconfigure
 
       # ============================================================
-      # SHOW TERRAFORM BACKEND
-      # ============================================================
-      - name: Verify Terraform State
-        working-directory: infra/terraform
-        run: |
-          echo "=========================================="
-          echo "TERRAFORM STATE BEFORE SECRET CHECK"
-          echo "=========================================="
-
-          terraform state list || true
-
-          echo ""
-          echo "=========================================="
-          echo "CHECKING JWT SECRET IN TERRAFORM STATE"
-          echo "=========================================="
-
-          if terraform state list | grep -Fxq "aws_secretsmanager_secret.jwt_access"; then
-            echo "JWT secret IS already in Terraform state."
-          else
-            echo "JWT secret is NOT currently in Terraform state."
-          fi
-
-      # ============================================================
-      # ENSURE AWS SECRET EXISTS IN TERRAFORM STATE
+      # CHECK EXISTING JWT SECRET
       # ============================================================
       - name: Ensure JWT Secret Is Managed By Terraform
         working-directory: infra/terraform
@@ -121,63 +81,55 @@ jobs:
             --output text 2>/dev/null || true)
 
           if [ -z "$SECRET_ARN" ] || [ "$SECRET_ARN" = "None" ]; then
-            echo "Secret does NOT exist in AWS."
-            echo "Terraform will create the secret."
-          else
-            echo "Secret exists in AWS:"
-            echo "$SECRET_ARN"
-
-            echo ""
-            echo "=========================================="
-            echo "CHECKING TERRAFORM STATE"
-            echo "=========================================="
-
-            if terraform state list | grep -Fxq "aws_secretsmanager_secret.jwt_access"; then
-
-              echo "Secret is already managed by Terraform."
-              echo "No import required."
-
-            else
-
-              echo "Secret is NOT managed by Terraform."
-              echo "Importing existing AWS secret..."
-
-              terraform import \
-                -input=false \
-                aws_secretsmanager_secret.jwt_access \
-                "$SECRET_ARN"
-
-              echo ""
-              echo "Import completed."
-
-            fi
+            echo "Secret does not exist in AWS."
+            echo "Terraform will create it."
+            exit 0
           fi
 
+          echo "Secret exists in AWS:"
+          echo "$SECRET_ARN"
+
+          echo ""
+          echo "=========================================="
+          echo "CHECKING TERRAFORM STATE DIRECTLY"
+          echo "=========================================="
+
+          if terraform state show aws_secretsmanager_secret.jwt_access >/dev/null 2>&1; then
+            echo "SUCCESS: Secret is already managed by Terraform."
+            echo ""
+            terraform state show aws_secretsmanager_secret.jwt_access
+            exit 0
+          fi
+
+          echo "Secret is NOT in Terraform state."
+          echo "Importing existing AWS secret..."
+
+          terraform import \
+            -input=false \
+            aws_secretsmanager_secret.jwt_access \
+            "$SECRET_ARN"
+
+          echo ""
+          echo "=========================================="
+          echo "VERIFYING IMPORT"
+          echo "=========================================="
+
+          terraform state show aws_secretsmanager_secret.jwt_access
+
+          echo ""
+          echo "SUCCESS: Secret has been imported into Terraform state."
+
       # ============================================================
-      # VERIFY SECRET IS NOW IN STATE
+      # VERIFY TERRAFORM STATE
       # ============================================================
-      - name: Verify JWT Secret State
+      - name: Verify Terraform State
         working-directory: infra/terraform
         run: |
           echo "=========================================="
-          echo "FINAL TERRAFORM STATE CHECK"
+          echo "TERRAFORM STATE"
           echo "=========================================="
 
-          terraform state list
-
-          echo ""
-          echo "Checking specifically for JWT secret..."
-
-          if terraform state list | grep -Fxq "aws_secretsmanager_secret.jwt_access"; then
-            echo ""
-            echo "SUCCESS:"
-            echo "aws_secretsmanager_secret.jwt_access is managed by Terraform."
-          else
-            echo ""
-            echo "ERROR:"
-            echo "aws_secretsmanager_secret.jwt_access is NOT in Terraform state."
-            exit 1
-          fi
+          terraform state show aws_secretsmanager_secret.jwt_access
 
       # ============================================================
       # VALIDATE
