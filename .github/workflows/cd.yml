@@ -29,7 +29,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install boto3
 
-      # Authenticate GitHub Actions with AWS using OIDC
+      # ============================================================
+      # AWS OIDC AUTHENTICATION
+      # ============================================================
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v5
         with:
@@ -38,12 +40,17 @@ jobs:
           audience: sts.amazonaws.com
           role-skip-session-tagging: true
 
-      # Verify AWS authentication
+      # ============================================================
+      # VERIFY AWS
+      # ============================================================
       - name: Verify AWS Connection
         run: |
+          echo "Checking AWS identity..."
           aws sts get-caller-identity
 
-      # Verify Boto3 credentials
+      # ============================================================
+      # VERIFY BOTO3
+      # ============================================================
       - name: Verify Boto3 Credentials
         run: |
           python - <<'PY'
@@ -60,58 +67,129 @@ jobs:
           print(f"AWS region: {session.region_name}")
           PY
 
-      # Terraform initialization
+      # ============================================================
+      # TERRAFORM INIT
+      # ============================================================
       - name: Terraform Init
         working-directory: infra/terraform
         run: |
-          terraform init -input=false -reconfigure
+          terraform init \
+            -input=false \
+            -reconfigure
 
-      # Check and import existing Secrets Manager secret
-      - name: Ensure JWT Secret Is In Terraform State
+      # ============================================================
+      # SHOW TERRAFORM BACKEND
+      # ============================================================
+      - name: Verify Terraform State
         working-directory: infra/terraform
+        run: |
+          echo "=========================================="
+          echo "TERRAFORM STATE BEFORE SECRET CHECK"
+          echo "=========================================="
+
+          terraform state list || true
+
+          echo ""
+          echo "=========================================="
+          echo "CHECKING JWT SECRET IN TERRAFORM STATE"
+          echo "=========================================="
+
+          if terraform state list | grep -Fxq "aws_secretsmanager_secret.jwt_access"; then
+            echo "JWT secret IS already in Terraform state."
+          else
+            echo "JWT secret is NOT currently in Terraform state."
+          fi
+
+      # ============================================================
+      # ENSURE AWS SECRET EXISTS IN TERRAFORM STATE
+      # ============================================================
+      - name: Ensure JWT Secret Is Managed By Terraform
+        working-directory: infra/terraform
+        shell: bash
         run: |
           set -e
 
           SECRET_NAME="secure-cloud/jwt-access-secret"
 
-          echo "Checking AWS Secrets Manager..."
+          echo "=========================================="
+          echo "CHECKING AWS SECRETS MANAGER"
+          echo "=========================================="
 
           SECRET_ARN=$(aws secretsmanager describe-secret \
             --secret-id "$SECRET_NAME" \
-            --query 'ARN' \
+            --query "ARN" \
             --output text 2>/dev/null || true)
 
           if [ -z "$SECRET_ARN" ] || [ "$SECRET_ARN" = "None" ]; then
-            echo "Secret does not exist in AWS."
-            echo "Terraform will create it."
+            echo "Secret does NOT exist in AWS."
+            echo "Terraform will create the secret."
           else
             echo "Secret exists in AWS:"
             echo "$SECRET_ARN"
 
-            echo "Checking Terraform state..."
+            echo ""
+            echo "=========================================="
+            echo "CHECKING TERRAFORM STATE"
+            echo "=========================================="
 
-            if terraform state list | grep -q '^aws_secretsmanager_secret\.jwt_access$'; then
+            if terraform state list | grep -Fxq "aws_secretsmanager_secret.jwt_access"; then
+
               echo "Secret is already managed by Terraform."
+              echo "No import required."
+
             else
-              echo "Secret is NOT in Terraform state."
-              echo "Importing existing secret..."
+
+              echo "Secret is NOT managed by Terraform."
+              echo "Importing existing AWS secret..."
 
               terraform import \
                 -input=false \
                 aws_secretsmanager_secret.jwt_access \
                 "$SECRET_ARN"
 
-              echo "Secret successfully imported."
+              echo ""
+              echo "Import completed."
+
             fi
           fi
 
-      # Validate Terraform configuration
+      # ============================================================
+      # VERIFY SECRET IS NOW IN STATE
+      # ============================================================
+      - name: Verify JWT Secret State
+        working-directory: infra/terraform
+        run: |
+          echo "=========================================="
+          echo "FINAL TERRAFORM STATE CHECK"
+          echo "=========================================="
+
+          terraform state list
+
+          echo ""
+          echo "Checking specifically for JWT secret..."
+
+          if terraform state list | grep -Fxq "aws_secretsmanager_secret.jwt_access"; then
+            echo ""
+            echo "SUCCESS:"
+            echo "aws_secretsmanager_secret.jwt_access is managed by Terraform."
+          else
+            echo ""
+            echo "ERROR:"
+            echo "aws_secretsmanager_secret.jwt_access is NOT in Terraform state."
+            exit 1
+          fi
+
+      # ============================================================
+      # VALIDATE
+      # ============================================================
       - name: Terraform Validate
         working-directory: infra/terraform
         run: |
           terraform validate
 
-      # Generate Terraform plan
+      # ============================================================
+      # PLAN
+      # ============================================================
       - name: Terraform Plan
         working-directory: infra/terraform
         run: |
@@ -119,7 +197,9 @@ jobs:
             -input=false \
             -out=tfplan
 
-      # Apply Terraform infrastructure
+      # ============================================================
+      # APPLY
+      # ============================================================
       - name: Terraform Apply
         working-directory: infra/terraform
         run: |
@@ -128,7 +208,9 @@ jobs:
             -auto-approve \
             tfplan
 
-      # Send email if deployment fails
+      # ============================================================
+      # FAILURE NOTIFICATION
+      # ============================================================
       - name: Notify on Deploy Failure
         if: ${{ failure() }}
         env:
