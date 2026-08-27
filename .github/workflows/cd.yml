@@ -1,4 +1,4 @@
-
+```yaml
 name: Continuous Delivery
 
 on:
@@ -30,7 +30,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install boto3
 
-      # Authenticate GitHub Actions with AWS using OIDC
+      # ---------------------------------------------------------
+      # AWS OIDC AUTHENTICATION
+      # ---------------------------------------------------------
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v5
         with:
@@ -39,72 +41,84 @@ jobs:
           audience: sts.amazonaws.com
           role-skip-session-tagging: true
 
-      # Verify AWS authentication
+      # ---------------------------------------------------------
+      # VERIFY AWS
+      # ---------------------------------------------------------
       - name: Verify AWS Connection
         run: |
           aws sts get-caller-identity
 
-      # Verify Boto3 credentials
-      - name: Verify Boto3 Credentials
-        run: |
-          python - <<'PY'
-          import boto3
-
-          session = boto3.Session()
-          credentials = session.get_credentials()
-
-          if credentials is None:
-              raise RuntimeError("Boto3 cannot find AWS credentials")
-
-          print("Boto3 credentials detected")
-          print(f"Credential method: {credentials.method}")
-          print(f"AWS region: {session.region_name}")
-          PY
-
-      # Initialize Terraform
+      # ---------------------------------------------------------
+      # TERRAFORM INIT
+      # ---------------------------------------------------------
       - name: Terraform Init
         working-directory: infra/terraform
         run: |
           terraform init -input=false -reconfigure
 
-      # Import existing Secrets Manager secret into Terraform state
+      # ---------------------------------------------------------
+      # IMPORT EXISTING JWT SECRET
+      # ---------------------------------------------------------
       - name: Import Existing JWT Secret
         working-directory: infra/terraform
         shell: bash
         run: |
+          echo "Checking AWS Secrets Manager..."
+
           SECRET_ARN=$(aws secretsmanager describe-secret \
             --secret-id "secure-cloud/jwt-access-secret" \
             --query "ARN" \
             --output text)
 
-          echo "Existing secret ARN:"
+          echo "Secret ARN:"
           echo "$SECRET_ARN"
 
-          if terraform state list | grep -q '^aws_secretsmanager_secret.jwt_access$'; then
-            echo "JWT secret is already present in Terraform state."
+          echo ""
+          echo "Checking Terraform state..."
+
+          if terraform state list | grep -Fxq "aws_secretsmanager_secret.jwt_access"; then
+            echo "Secret is already in Terraform state."
           else
-            echo "Importing existing JWT secret into Terraform state..."
+            echo "Secret is NOT in Terraform state."
+            echo "Importing existing secret..."
+
             terraform import \
               -input=false \
-              aws_secretsmanager_secret.jwt_access \
+              "aws_secretsmanager_secret.jwt_access" \
               "$SECRET_ARN"
           fi
 
-      # Validate Terraform configuration
+          echo ""
+          echo "Terraform state after import:"
+          terraform state list
+
+          echo ""
+          echo "Checking imported secret:"
+          terraform state show aws_secretsmanager_secret.jwt_access
+
+      # ---------------------------------------------------------
+      # VALIDATE
+      # ---------------------------------------------------------
       - name: Terraform Validate
         working-directory: infra/terraform
-        run: terraform validate
+        run: |
+          terraform validate
 
-      # Generate a fresh Terraform plan
+      # ---------------------------------------------------------
+      # PLAN
+      # ---------------------------------------------------------
       - name: Terraform Plan
         working-directory: infra/terraform
         run: |
           rm -f tfplan
+
           terraform plan \
             -input=false \
             -out=tfplan
 
-      # Apply the fresh Terraform plan
+      # ---------------------------------------------------------
+      # APPLY
+      # ---------------------------------------------------------
       - name: Terraform Apply
         working-directory: infra/terraform
         run: |
@@ -113,7 +127,9 @@ jobs:
             -auto-approve \
             tfplan
 
-      # Send email if deployment fails
+      # ---------------------------------------------------------
+      # FAILURE NOTIFICATION
+      # ---------------------------------------------------------
       - name: Notify on Deploy Failure
         if: ${{ failure() }}
         env:
@@ -126,4 +142,3 @@ jobs:
             --event "DEPLOY_FAILURE" \
             --repo "${{ github.repository }}" \
             --run "${{ github.run_id }}"
-
