@@ -1,4 +1,4 @@
-```yaml
+
 name: Continuous Delivery
 
 on:
@@ -126,4 +126,4 @@ jobs:
             --event "DEPLOY_FAILURE" \
             --repo "${{ github.repository }}" \
             --run "${{ github.run_id }}"
-#hhh
+```
