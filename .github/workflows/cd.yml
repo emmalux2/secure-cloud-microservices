@@ -197,40 +197,57 @@ jobs:
         run: |
           set -e
 
+          ```yaml
+      # ============================================================
+      # SYNCHRONIZE EXISTING WAF
+      # ============================================================
+
+      - name: Synchronize Existing WAF
+        working-directory: infra/terraform
+        run: |
+          set -e
+
           echo "=========================================="
-          echo "SYNCHRONIZING WAF LOG GROUP"
+          echo "SYNCHRONIZING EXISTING WAF"
           echo "=========================================="
 
           STATE_LIST=$(terraform state list 2>/dev/null || true)
 
-          if echo "$STATE_LIST" | grep -q '^aws_cloudwatch_log_group\.waf_log_group$'; then
+          if echo "$STATE_LIST" | grep -q '^aws_wafv2_web_acl\.main$'; then
 
-            echo "WAF log group is already managed by Terraform."
+            echo "WAF is already managed by Terraform."
 
           else
 
-            if aws logs describe-log-groups \
-              --log-group-name-prefix "aws-waf-logs-main" \
+            WAF_ID=$(aws wafv2 list-web-acls \
+              --scope REGIONAL \
               --region us-east-1 \
-              --query "logGroups[?logGroupName=='aws-waf-logs-main'].logGroupName | [0]" \
-              --output text | grep -q "aws-waf-logs-main"; then
+              --query "WebACLs[?Name=='main-waf'].Id | [0]" \
+              --output text)
 
-              echo "Existing WAF log group found."
+            if [ -z "$WAF_ID" ] || [ "$WAF_ID" = "None" ]; then
 
-              terraform import \
-                -input=false \
-                aws_cloudwatch_log_group.waf_log_group \
-                "aws-waf-logs-main"
-
-              echo "WAF log group successfully imported."
+              echo "WAF main-waf does not exist."
+              echo "Terraform will create it."
 
             else
 
-              echo "WAF log group does not exist."
-              echo "Terraform will create it."
+              echo "Existing WAF ID found:"
+              echo "$WAF_ID"
+
+              echo "Importing WAF using:"
+              echo "$WAF_ID/main-waf/REGIONAL"
+
+              terraform import \
+                -input=false \
+                aws_wafv2_web_acl.main \
+                "$WAF_ID/main-waf/REGIONAL"
+
+              echo "WAF successfully imported."
 
             fi
           fi
+
 
 
       # ============================================================
