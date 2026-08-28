@@ -13,23 +13,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
       - name: Checkout Repository
         uses: actions/checkout@v5
 
+
+      # ============================================================
+      # TERRAFORM
+      # ============================================================
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+
+
+      # ============================================================
+      # PYTHON
+      # ============================================================
 
       - name: Setup Python Environment
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
+
+      # ============================================================
+      # PYTHON DEPENDENCIES
+      # ============================================================
+
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install boto3
 
-      # Authenticate GitHub Actions with AWS using OIDC
+
+      # ============================================================
+      # AWS OIDC AUTHENTICATION
+      # ============================================================
+
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v5
         with:
@@ -38,12 +62,24 @@ jobs:
           audience: sts.amazonaws.com
           role-skip-session-tagging: true
 
-      # Verify AWS authentication
+
+      # ============================================================
+      # VERIFY AWS
+      # ============================================================
+
       - name: Verify AWS Connection
         run: |
+          echo "=========================================="
+          echo "VERIFYING AWS CONNECTION"
+          echo "=========================================="
+
           aws sts get-caller-identity
 
-      # Verify Boto3 credentials
+
+      # ============================================================
+      # VERIFY BOTO3
+      # ============================================================
+
       - name: Verify Boto3 Credentials
         run: |
           python - <<'PY'
@@ -60,7 +96,11 @@ jobs:
           print(f"AWS region: {session.region_name}")
           PY
 
-      # Check Terraform S3 backend bucket
+
+      # ============================================================
+      # CHECK TERRAFORM STATE BUCKET
+      # ============================================================
+
       - name: Check Terraform State Bucket
         run: |
           echo "=========================================="
@@ -82,12 +122,16 @@ jobs:
             echo "ERROR: Terraform state bucket does not exist:"
             echo "$BUCKET"
             echo ""
-            echo "Create this S3 bucket before Terraform can initialize."
-            exit 1
+            echo "Create the bucket before Terraform can initialize."
 
+            exit 1
           fi
 
-      # Terraform initialization
+
+      # ============================================================
+      # TERRAFORM INIT
+      # ============================================================
+
       - name: Terraform Init
         working-directory: infra/terraform
         run: |
@@ -95,13 +139,225 @@ jobs:
             -input=false \
             -reconfigure
 
-      # Validate Terraform configuration
+
+      # ============================================================
+      # SYNCHRONIZE WAF
+      # ============================================================
+
+      - name: Synchronize Existing WAF
+        working-directory: infra/terraform
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "SYNCHRONIZING EXISTING WAF"
+          echo "=========================================="
+
+          STATE_LIST=$(terraform state list 2>/dev/null || true)
+
+          if echo "$STATE_LIST" | grep -q '^aws_wafv2_web_acl\.main$'; then
+
+            echo "WAF is already managed by Terraform."
+
+          else
+
+            WAF_ARN=$(aws wafv2 list-web-acls \
+              --scope REGIONAL \
+              --region us-east-1 \
+              --query "WebACLs[?Name=='main-waf'].ARN | [0]" \
+              --output text)
+
+            if [ -z "$WAF_ARN" ] || [ "$WAF_ARN" = "None" ]; then
+
+              echo "WAF main-waf does not exist."
+              echo "Terraform will create it."
+
+            else
+
+              echo "Existing WAF found:"
+              echo "$WAF_ARN"
+
+              terraform import \
+                -input=false \
+                aws_wafv2_web_acl.main \
+                "$WAF_ARN"
+
+              echo "WAF successfully imported."
+
+            fi
+          fi
+
+
+      # ============================================================
+      # SYNCHRONIZE WAF LOG GROUP
+      # ============================================================
+
+      - name: Synchronize WAF Log Group
+        working-directory: infra/terraform
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "SYNCHRONIZING WAF LOG GROUP"
+          echo "=========================================="
+
+          STATE_LIST=$(terraform state list 2>/dev/null || true)
+
+          if echo "$STATE_LIST" | grep -q '^aws_cloudwatch_log_group\.waf_log_group$'; then
+
+            echo "WAF log group is already managed by Terraform."
+
+          else
+
+            if aws logs describe-log-groups \
+              --log-group-name-prefix "aws-waf-logs-main" \
+              --region us-east-1 \
+              --query "logGroups[?logGroupName=='aws-waf-logs-main'].logGroupName | [0]" \
+              --output text | grep -q "aws-waf-logs-main"; then
+
+              echo "Existing WAF log group found."
+
+              terraform import \
+                -input=false \
+                aws_cloudwatch_log_group.waf_log_group \
+                "aws-waf-logs-main"
+
+              echo "WAF log group successfully imported."
+
+            else
+
+              echo "WAF log group does not exist."
+              echo "Terraform will create it."
+
+            fi
+          fi
+
+
+      # ============================================================
+      # SYNCHRONIZE EKS CLUSTER LOG GROUP
+      # ============================================================
+
+      - name: Synchronize EKS Log Group
+        working-directory: infra/terraform
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "SYNCHRONIZING EKS LOG GROUP"
+          echo "=========================================="
+
+          STATE_LIST=$(terraform state list 2>/dev/null || true)
+
+          if echo "$STATE_LIST" | grep -q '^module\.eks\.aws_cloudwatch_log_group\.this\[0\]$'; then
+
+            echo "EKS log group is already managed by Terraform."
+
+          else
+
+            EKS_LOG_GROUP="/aws/eks/secure-cloud-cluster/cluster"
+
+            if aws logs describe-log-groups \
+              --log-group-name-prefix "$EKS_LOG_GROUP" \
+              --region us-east-1 \
+              --query "logGroups[?logGroupName=='$EKS_LOG_GROUP'].logGroupName | [0]" \
+              --output text | grep -q "$EKS_LOG_GROUP"; then
+
+              echo "Existing EKS log group found:"
+              echo "$EKS_LOG_GROUP"
+
+              terraform import \
+                -input=false \
+                'module.eks.aws_cloudwatch_log_group.this[0]' \
+                "$EKS_LOG_GROUP"
+
+              echo "EKS log group successfully imported."
+
+            else
+
+              echo "EKS log group does not exist."
+              echo "Terraform will create it."
+
+            fi
+          fi
+
+
+      # ============================================================
+      # SYNCHRONIZE EKS KMS ALIAS
+      # ============================================================
+
+      - name: Synchronize EKS KMS Alias
+        working-directory: infra/terraform
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "SYNCHRONIZING EKS KMS ALIAS"
+          echo "=========================================="
+
+          STATE_LIST=$(terraform state list 2>/dev/null || true)
+
+          KMS_ALIAS_ADDRESS='module.eks.module.kms.aws_kms_alias.this["cluster"]'
+
+          if echo "$STATE_LIST" | grep -Fq "$KMS_ALIAS_ADDRESS"; then
+
+            echo "EKS KMS alias is already managed by Terraform."
+
+          else
+
+            KMS_ALIAS="alias/eks/secure-cloud-cluster"
+
+            if aws kms list-aliases \
+              --region us-east-1 \
+              --query "Aliases[?AliasName=='$KMS_ALIAS'].AliasName | [0]" \
+              --output text | grep -q "$KMS_ALIAS"; then
+
+              echo "Existing KMS alias found:"
+              echo "$KMS_ALIAS"
+
+              terraform import \
+                -input=false \
+                "$KMS_ALIAS_ADDRESS" \
+                "$KMS_ALIAS"
+
+              echo "KMS alias successfully imported."
+
+            else
+
+              echo "KMS alias does not exist."
+              echo "Terraform will create it."
+
+            fi
+          fi
+
+
+      # ============================================================
+      # FINAL TERRAFORM STATE
+      # ============================================================
+
+      - name: Final Terraform State
+        working-directory: infra/terraform
+        run: |
+          echo "=========================================="
+          echo "FINAL TERRAFORM STATE"
+          echo "=========================================="
+
+          terraform state list || true
+
+
+      # ============================================================
+      # VALIDATE
+      # ============================================================
+
       - name: Terraform Validate
         working-directory: infra/terraform
         run: |
           terraform validate
 
-      # Generate Terraform plan
+
+      # ============================================================
+      # TERRAFORM PLAN
+      # ============================================================
+
       - name: Terraform Plan
         working-directory: infra/terraform
         run: |
@@ -109,7 +365,11 @@ jobs:
             -input=false \
             -out=tfplan
 
-      # Apply Terraform infrastructure
+
+      # ============================================================
+      # TERRAFORM APPLY
+      # ============================================================
+
       - name: Terraform Apply
         working-directory: infra/terraform
         run: |
@@ -118,7 +378,11 @@ jobs:
             -auto-approve \
             tfplan
 
-      # Send email if deployment fails
+
+      # ============================================================
+      # DEPLOYMENT FAILURE EMAIL
+      # ============================================================
+
       - name: Notify on Deploy Failure
         if: ${{ failure() }}
         env:
