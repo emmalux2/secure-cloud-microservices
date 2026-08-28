@@ -4,7 +4,7 @@ module "eks" {
   #checkov:skip=CKV_TF_1:Using official terraform registry version
   source          = "terraform-aws-modules/eks/aws"
   version         = "20.24.0"
-  cluster_name    = "secure-cloud-cluster"
+  cluster_name    = "secure-cloud-cluster-v2"
   cluster_version = "1.34"
 
   vpc_id     = module.vpc.vpc_id

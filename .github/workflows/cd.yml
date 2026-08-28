@@ -13,22 +13,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # CHECKOUT REPOSITORY
+      # ============================================================
       - name: Checkout Repository
         uses: actions/checkout@v5
 
+
+      # ============================================================
+      # SETUP TERRAFORM
+      # ============================================================
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
+
+      # ============================================================
+      # SETUP PYTHON
+      # ============================================================
       - name: Setup Python Environment
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
+
+      # ============================================================
+      # INSTALL DEPENDENCIES
+      # ============================================================
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install boto3
 
+
+      # ============================================================
+      # AUTHENTICATE GITHUB ACTIONS WITH AWS USING OIDC
+      # ============================================================
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v5
         with:
@@ -37,66 +57,181 @@ jobs:
           audience: sts.amazonaws.com
           role-skip-session-tagging: true
 
-      - name: Verify AWS Connection
-        run: aws sts get-caller-identity
 
+      # ============================================================
+      # VERIFY AWS CONNECTION
+      # ============================================================
+      - name: Verify AWS Connection
+        run: |
+          aws sts get-caller-identity
+
+
+      # ============================================================
+      # VERIFY BOTO3 CREDENTIALS
+      # ============================================================
+      - name: Verify Boto3 Credentials
+        run: |
+          python - <<'PY'
+          import boto3
+
+          session = boto3.Session()
+          credentials = session.get_credentials()
+
+          if credentials is None:
+              raise RuntimeError("Boto3 cannot find AWS credentials")
+
+          print("Boto3 credentials detected")
+          print(f"Credential method: {credentials.method}")
+          print(f"AWS region: {session.region_name}")
+          PY
+
+
+      # ============================================================
+      # CHECK TERRAFORM STATE BUCKET
+      # ============================================================
       - name: Check Terraform State Bucket
         run: |
+          set -e
+
+          echo "=========================================="
+          echo "CHECKING TERRAFORM STATE BUCKET"
+          echo "=========================================="
+
           BUCKET="secure-cloud-microservices-tfstate-797776210271"
           REGION="us-east-1"
-          aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" || \
-            (echo "ERROR: Terraform state bucket missing"; exit 1)
 
+          if aws s3api head-bucket \
+            --bucket "$BUCKET" \
+            --region "$REGION"; then
+
+            echo "Terraform state bucket exists:"
+            echo "$BUCKET"
+
+          else
+
+            echo "ERROR: Terraform state bucket does not exist:"
+            echo "$BUCKET"
+            echo ""
+            echo "Create this S3 bucket before Terraform can initialize."
+            exit 1
+
+          fi
+
+
+      # ============================================================
+      # TERRAFORM INIT
+      # ============================================================
       - name: Terraform Init
         working-directory: infra/terraform
-        run: terraform init -input=false -reconfigure
+        run: |
+          terraform init \
+            -input=false \
+            -reconfigure
 
-      - name: Synchronize Existing JWT Secret
+
+      # ============================================================
+      # VERIFY EXISTING JWT SECRET
+      # ============================================================
+      - name: Verify JWT Secret
         working-directory: infra/terraform
         run: |
+          set -e
+
           SECRET_NAME="secure-cloud/jwt-access-secret"
-          SECRET_ARN=$(aws secretsmanager describe-secret \
+
+          echo "=========================================="
+          echo "CHECKING AWS SECRETS MANAGER"
+          echo "=========================================="
+
+          if aws secretsmanager describe-secret \
             --secret-id "$SECRET_NAME" \
-            --region us-east-1 \
-            --query 'ARN' \
-            --output text 2>/dev/null || true)
+            --region us-east-1 >/dev/null 2>&1; then
 
-          if [ -n "$SECRET_ARN" ] && [ "$SECRET_ARN" != "None" ]; then
-            echo "JWT secret exists, using data source."
+            echo "JWT secret exists in AWS:"
+            echo "$SECRET_NAME"
+
           else
-            echo "JWT secret not found, Terraform will create it."
+
+            echo "WARNING: JWT secret does not exist in AWS."
+            echo "Check secrets.tf before continuing."
+
           fi
 
-      - name: Synchronize Existing EKS Cluster
-        working-directory: infra/terraform
+
+      # ============================================================
+      # CHECK NEW EKS CLUSTER NAME
+      #
+      # Terraform should create:
+      # secure-cloud-cluster-v2
+      #
+      # The old secure-cloud-cluster is not imported.
+      # ============================================================
+      - name: Check EKS Cluster v2
         run: |
-          CLUSTER_NAME="secure-cloud-cluster"
-          TF_RESOURCE='module.eks.aws_eks_cluster.this[0]'
+          set -e
 
-          if aws eks describe-cluster --name "$CLUSTER_NAME" --region us-east-1 >/dev/null 2>&1; then
-            echo "Cluster exists in AWS."
-            if ! terraform state list | grep -Fqx "$TF_RESOURCE"; then
-              echo "Importing cluster into Terraform state..."
-              terraform import -input=false "$TF_RESOURCE" "$CLUSTER_NAME" || true
-            else
-              echo "Cluster already managed in Terraform state."
-            fi
+          CLUSTER_NAME="secure-cloud-cluster-v2"
+          REGION="us-east-1"
+
+          echo "=========================================="
+          echo "CHECKING EKS CLUSTER V2"
+          echo "=========================================="
+
+          if aws eks describe-cluster \
+            --name "$CLUSTER_NAME" \
+            --region "$REGION" >/dev/null 2>&1; then
+
+            echo "EKS cluster already exists:"
+            echo "$CLUSTER_NAME"
+            echo ""
+            echo "Terraform should manage this existing cluster."
+            echo "If it is not in Terraform state, an import is required."
+
           else
-            echo "Cluster does not exist, Terraform will create it."
+
+            echo "EKS cluster does not exist:"
+            echo "$CLUSTER_NAME"
+            echo ""
+            echo "Terraform will create the new cluster."
+
           fi
 
+
+      # ============================================================
+      # TERRAFORM VALIDATE
+      # ============================================================
       - name: Terraform Validate
         working-directory: infra/terraform
-        run: terraform validate
+        run: |
+          terraform validate
 
+
+      # ============================================================
+      # TERRAFORM PLAN
+      # ============================================================
       - name: Terraform Plan
         working-directory: infra/terraform
-        run: terraform plan -input=false -out=tfplan -detailed-exitcode || true
+        run: |
+          terraform plan \
+            -input=false \
+            -out=tfplan
 
+
+      # ============================================================
+      # TERRAFORM APPLY
+      # ============================================================
       - name: Terraform Apply
         working-directory: infra/terraform
-        run: terraform apply -input=false -auto-approve tfplan
+        run: |
+          terraform apply \
+            -input=false \
+            -auto-approve \
+            tfplan
 
+
+      # ============================================================
+      # DEPLOYMENT FAILURE NOTIFICATION
+      # ============================================================
       - name: Notify on Deploy Failure
         if: ${{ failure() }}
         env:
@@ -104,4 +239,8 @@ jobs:
           AWS_REGION: us-east-1
           SES_SENDER: ${{ secrets.SES_SENDER }}
           SES_RECIPIENT: ${{ secrets.SES_RECIPIENT }}
-        run: python alerts/notify.py --event "DEPLOY_FAILURE" --repo "${{ github.repository }}" --run "${{ github.run_id }}"
+        run: |
+          python alerts/notify.py \
+            --event "DEPLOY_FAILURE" \
+            --repo "${{ github.repository }}" \
+            --run "${{ github.run_id }}"
