@@ -256,47 +256,55 @@ jobs:
 
           fi
 
+            # ============================================================
+      # SYNCHRONIZE EXISTING EKS CLUSTER
       # ============================================================
-      # SYNCHRONIZE EXISTING EKS CLOUDWATCH LOG GROUP
-      # ============================================================
-      - name: Synchronize EKS Cluster Log Group
+      - name: Synchronize Existing EKS Cluster
         working-directory: infra/terraform
         run: |
           set -e
 
+          CLUSTER_NAME="secure-cloud-cluster"
+          REGION="us-east-1"
+
           echo "=========================================="
-          echo "SYNCHRONIZING EKS CLUSTER LOG GROUP"
+          echo "SYNCHRONIZING EXISTING EKS CLUSTER"
           echo "=========================================="
 
-          LOG_GROUP_NAME="/aws/eks/secure-cloud-cluster/cluster"
+          if aws eks describe-cluster \
+            --name "$CLUSTER_NAME" \
+            --region "$REGION" >/dev/null 2>&1; then
 
-          STATE_LIST=$(terraform state list 2>/dev/null || true)
+            echo "Existing EKS cluster found:"
+            echo "$CLUSTER_NAME"
 
-          if echo "$STATE_LIST" | grep -q '^module\.eks\.aws_cloudwatch_log_group\.this\[0\]$'; then
+            echo "=========================================="
+            echo "CHECKING TERRAFORM STATE"
+            echo "=========================================="
 
-            echo "EKS cluster log group is already managed by Terraform."
+            STATE_LIST=$(terraform state list 2>/dev/null || true)
 
-          elif aws logs describe-log-groups \
-            --log-group-name-prefix "$LOG_GROUP_NAME" \
-            --region us-east-1 \
-            --query "logGroups[?logGroupName=='$LOG_GROUP_NAME'].logGroupName" \
-            --output text | grep -q "$LOG_GROUP_NAME"; then
+            if echo "$STATE_LIST" | grep -q '^module\.eks\.aws_eks_cluster\.this\[0\]$'; then
 
-            echo "Existing EKS cluster log group found:"
-            echo "$LOG_GROUP_NAME"
+              echo "EKS cluster is already managed by Terraform."
 
-            echo "Importing existing log group..."
+            else
 
-            terraform import \
-              -input=false \
-              'module.eks.aws_cloudwatch_log_group.this[0]' \
-              "$LOG_GROUP_NAME"
+              echo "EKS cluster is NOT managed by Terraform."
+              echo "Importing existing EKS cluster..."
 
-            echo "EKS cluster log group successfully imported."
+              terraform import \
+                -input=false \
+                'module.eks.aws_eks_cluster.this[0]' \
+                "$CLUSTER_NAME"
+
+              echo "EKS cluster successfully imported."
+
+            fi
 
           else
 
-            echo "EKS cluster log group does not exist."
+            echo "EKS cluster does not exist in AWS."
             echo "Terraform will create it."
 
           fi
