@@ -1,3 +1,4 @@
+```yaml
 name: Continuous Delivery
 
 on:
@@ -152,38 +153,21 @@ jobs:
           if [ -z "$SECRET_ARN" ] || [ "$SECRET_ARN" = "None" ]; then
 
             echo "JWT secret does not exist in AWS."
-            echo "Terraform will handle the resource."
+            echo "Terraform configuration will handle this."
 
           else
 
             echo "Existing JWT secret found:"
             echo "$SECRET_ARN"
 
-            echo "=========================================="
-            echo "CHECKING TERRAFORM STATE"
-            echo "=========================================="
+            echo ""
+            echo "The current secrets.tf uses:"
+            echo 'data "aws_secretsmanager_secret" "jwt_access"'
 
-            STATE_LIST=$(terraform state list 2>/dev/null || true)
+            echo ""
+            echo "Therefore the JWT secret is READ from AWS"
+            echo "as a data source and must NOT be imported."
 
-            if echo "$STATE_LIST" | grep -Fqx 'aws_secretsmanager_secret.jwt_access'; then
-
-              echo "JWT secret is already managed by Terraform."
-
-            else
-
-              echo "JWT secret is not managed by Terraform."
-
-              # The current secrets.tf uses a DATA SOURCE:
-              #
-              # data "aws_secretsmanager_secret" "jwt_access"
-              #
-              # Therefore Terraform must NOT import this secret.
-              # It is intentionally read from AWS instead.
-
-              echo "JWT secret is configured as a data source."
-              echo "No Terraform import is required."
-
-            fi
           fi
 
 
@@ -193,6 +177,9 @@ jobs:
       # IMPORTANT:
       # This step is AFTER Terraform Init
       # and BEFORE Terraform Validate.
+      #
+      # It imports the existing EKS cluster and then verifies
+      # that the resource actually exists in Terraform state.
       # ============================================================
       - name: Synchronize Existing EKS Cluster
         working-directory: infra/terraform
@@ -201,10 +188,13 @@ jobs:
 
           CLUSTER_NAME="secure-cloud-cluster"
           REGION="us-east-1"
+          TF_RESOURCE='module.eks.aws_eks_cluster.this[0]'
 
           echo "=========================================="
           echo "SYNCHRONIZING EXISTING EKS CLUSTER"
           echo "=========================================="
+
+          echo "Checking AWS for EKS cluster..."
 
           if aws eks describe-cluster \
             --name "$CLUSTER_NAME" \
@@ -213,36 +203,100 @@ jobs:
             echo "Existing EKS cluster found:"
             echo "$CLUSTER_NAME"
 
-            echo "=========================================="
-            echo "CHECKING TERRAFORM STATE"
-            echo "=========================================="
-
-            STATE_LIST=$(terraform state list 2>/dev/null || true)
-
-            if echo "$STATE_LIST" | grep -Fqx 'module.eks.aws_eks_cluster.this[0]'; then
-
-              echo "EKS cluster is already managed by Terraform."
-
-            else
-
-              echo "EKS cluster is NOT managed by Terraform."
-              echo "Importing existing EKS cluster..."
-
-              terraform import \
-                -input=false \
-                'module.eks.aws_eks_cluster.this[0]' \
-                "$CLUSTER_NAME"
-
-              echo "EKS cluster successfully imported."
-
-            fi
-
           else
 
             echo "EKS cluster does not exist in AWS."
-            echo "Terraform will create it."
+            echo "Terraform will create the cluster."
+            exit 0
 
           fi
+
+
+          echo ""
+          echo "=========================================="
+          echo "CHECKING TERRAFORM STATE"
+          echo "=========================================="
+
+          echo "Checking S3-backed Terraform state..."
+
+          terraform state pull >/dev/null
+
+          STATE_LIST=$(terraform state list 2>/dev/null || true)
+
+          if echo "$STATE_LIST" | grep -Fqx "$TF_RESOURCE"; then
+
+            echo "EKS cluster is already managed by Terraform."
+            echo "$TF_RESOURCE"
+
+          else
+
+            echo "EKS cluster is NOT in Terraform state."
+            echo ""
+            echo "Importing existing EKS cluster..."
+            echo ""
+
+            terraform import \
+              -input=false \
+              "$TF_RESOURCE" \
+              "$CLUSTER_NAME"
+
+            echo ""
+            echo "=========================================="
+            echo "VERIFYING EKS IMPORT"
+            echo "=========================================="
+
+            if terraform state show "$TF_RESOURCE" >/dev/null 2>&1; then
+
+              echo "SUCCESS: EKS cluster was imported."
+              echo "$TF_RESOURCE"
+
+            else
+
+              echo "ERROR: Terraform import completed but"
+              echo "the EKS cluster cannot be found in state."
+
+              exit 1
+
+            fi
+
+          fi
+
+
+          echo ""
+          echo "=========================================="
+          echo "FINAL TERRAFORM STATE VERIFICATION"
+          echo "=========================================="
+
+          FINAL_STATE=$(terraform state list 2>/dev/null || true)
+
+          if echo "$FINAL_STATE" | grep -Fqx "$TF_RESOURCE"; then
+
+            echo "SUCCESS: EKS cluster is present in Terraform state."
+            echo ""
+            echo "Terraform resource:"
+            echo "$TF_RESOURCE"
+
+          else
+
+            echo "ERROR: EKS cluster is NOT present in Terraform state."
+            echo ""
+            echo "Terraform will NOT continue to plan/apply."
+            exit 1
+
+          fi
+
+
+          echo ""
+          echo "=========================================="
+          echo "EKS STATE DETAILS"
+          echo "=========================================="
+
+          terraform state show "$TF_RESOURCE"
+
+          echo ""
+          echo "=========================================="
+          echo "EKS SYNCHRONIZATION COMPLETE"
+          echo "=========================================="
 
 
       # ============================================================
