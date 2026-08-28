@@ -20,11 +20,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v5
 
+
       # ============================================================
       # SETUP TERRAFORM
       # ============================================================
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+
 
       # ============================================================
       # SETUP PYTHON
@@ -34,6 +36,7 @@ jobs:
         with:
           python-version: "3.11"
 
+
       # ============================================================
       # INSTALL DEPENDENCIES
       # ============================================================
@@ -42,8 +45,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install boto3
 
+
       # ============================================================
-      # AUTHENTICATE WITH AWS USING OIDC
+      # AUTHENTICATE GITHUB ACTIONS WITH AWS USING OIDC
       # ============================================================
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v5
@@ -53,12 +57,14 @@ jobs:
           audience: sts.amazonaws.com
           role-skip-session-tagging: true
 
+
       # ============================================================
       # VERIFY AWS AUTHENTICATION
       # ============================================================
       - name: Verify AWS Connection
         run: |
           aws sts get-caller-identity
+
 
       # ============================================================
       # VERIFY BOTO3 CREDENTIALS
@@ -78,6 +84,7 @@ jobs:
           print(f"Credential method: {credentials.method}")
           print(f"AWS region: {session.region_name}")
           PY
+
 
       # ============================================================
       # CHECK TERRAFORM STATE BUCKET
@@ -104,12 +111,15 @@ jobs:
 
             echo "ERROR: Terraform state bucket does not exist:"
             echo "$BUCKET"
+            echo ""
+            echo "Create this S3 bucket before Terraform can initialize."
             exit 1
 
           fi
 
+
       # ============================================================
-      # TERRAFORM INIT
+      # TERRAFORM INITIALIZATION
       # ============================================================
       - name: Terraform Init
         working-directory: infra/terraform
@@ -117,6 +127,7 @@ jobs:
           terraform init \
             -input=false \
             -reconfigure
+
 
       # ============================================================
       # SYNCHRONIZE EXISTING JWT SECRET
@@ -129,7 +140,7 @@ jobs:
           SECRET_NAME="secure-cloud/jwt-access-secret"
 
           echo "=========================================="
-          echo "SYNCHRONIZING AWS SECRETS MANAGER"
+          echo "SYNCHRONIZING EXISTING JWT SECRET"
           echo "=========================================="
 
           SECRET_ARN=$(aws secretsmanager describe-secret \
@@ -140,124 +151,48 @@ jobs:
 
           if [ -z "$SECRET_ARN" ] || [ "$SECRET_ARN" = "None" ]; then
 
-            echo "Secret does not exist in AWS."
-            echo "Terraform configuration should create it."
+            echo "JWT secret does not exist in AWS."
+            echo "Terraform will handle the resource."
 
           else
 
-            echo "Existing secret found:"
+            echo "Existing JWT secret found:"
             echo "$SECRET_ARN"
 
-            echo "Secret is configured as a Terraform data source."
-            echo "No Terraform import is required."
-
-          fi
-
-      # ============================================================
-      # SYNCHRONIZE EXISTING WAF
-      # ============================================================
-      - name: Synchronize Existing WAF
-        working-directory: infra/terraform
-        run: |
-          set -e
-
-          echo "=========================================="
-          echo "SYNCHRONIZING EXISTING WAF"
-          echo "=========================================="
-
-          WAF_NAME="main-waf"
-          WAF_SCOPE="REGIONAL"
-          WAF_REGION="us-east-1"
-
-          WAF_ID=$(aws wafv2 list-web-acls \
-            --scope "$WAF_SCOPE" \
-            --region "$WAF_REGION" \
-            --query "WebACLs[?Name=='$WAF_NAME'].Id | [0]" \
-            --output text)
-
-          if [ -z "$WAF_ID" ] || [ "$WAF_ID" = "None" ]; then
-
-            echo "WAF does not exist in AWS."
-            echo "Terraform will create it."
-
-          else
-
-            echo "Existing WAF found:"
-            echo "Name: $WAF_NAME"
-            echo "ID: $WAF_ID"
-            echo "Scope: $WAF_SCOPE"
+            echo "=========================================="
+            echo "CHECKING TERRAFORM STATE"
+            echo "=========================================="
 
             STATE_LIST=$(terraform state list 2>/dev/null || true)
 
-            if echo "$STATE_LIST" | grep -q '^aws_wafv2_web_acl\.main$'; then
+            if echo "$STATE_LIST" | grep -Fqx 'aws_secretsmanager_secret.jwt_access'; then
 
-              echo "WAF is already managed by Terraform."
+              echo "JWT secret is already managed by Terraform."
 
             else
 
-              echo "WAF is NOT managed by Terraform."
-              echo "Importing existing WAF..."
+              echo "JWT secret is not managed by Terraform."
 
-              WAF_IMPORT_ID="${WAF_ID}/${WAF_NAME}/${WAF_SCOPE}"
+              # The current secrets.tf uses a DATA SOURCE:
+              #
+              # data "aws_secretsmanager_secret" "jwt_access"
+              #
+              # Therefore Terraform must NOT import this secret.
+              # It is intentionally read from AWS instead.
 
-              echo "Terraform import ID:"
-              echo "$WAF_IMPORT_ID"
-
-              terraform import \
-                -input=false \
-                aws_wafv2_web_acl.main \
-                "$WAF_IMPORT_ID"
-
-              echo "WAF successfully imported."
+              echo "JWT secret is configured as a data source."
+              echo "No Terraform import is required."
 
             fi
           fi
 
+
       # ============================================================
-      # SYNCHRONIZE WAF LOG GROUP
-      # ============================================================
-      - name: Synchronize WAF Log Group
-        working-directory: infra/terraform
-        run: |
-          set -e
-
-          echo "=========================================="
-          echo "SYNCHRONIZING WAF LOG GROUP"
-          echo "=========================================="
-
-          LOG_GROUP_NAME="aws-waf-logs-main"
-
-          STATE_LIST=$(terraform state list 2>/dev/null || true)
-
-          if echo "$STATE_LIST" | grep -q '^aws_cloudwatch_log_group\.waf_log_group$'; then
-
-            echo "WAF log group is already managed by Terraform."
-
-          elif aws logs describe-log-groups \
-            --log-group-name-prefix "$LOG_GROUP_NAME" \
-            --region us-east-1 \
-            --query "logGroups[?logGroupName=='$LOG_GROUP_NAME'].logGroupName" \
-            --output text | grep -q "$LOG_GROUP_NAME"; then
-
-            echo "Existing WAF log group found."
-            echo "Importing..."
-
-            terraform import \
-              -input=false \
-              aws_cloudwatch_log_group.waf_log_group \
-              "$LOG_GROUP_NAME"
-
-            echo "WAF log group successfully imported."
-
-          else
-
-            echo "WAF log group does not exist."
-            echo "Terraform will create it."
-
-          fi
-
-            # ============================================================
       # SYNCHRONIZE EXISTING EKS CLUSTER
+      #
+      # IMPORTANT:
+      # This step is AFTER Terraform Init
+      # and BEFORE Terraform Validate.
       # ============================================================
       - name: Synchronize Existing EKS Cluster
         working-directory: infra/terraform
@@ -284,7 +219,7 @@ jobs:
 
             STATE_LIST=$(terraform state list 2>/dev/null || true)
 
-            if echo "$STATE_LIST" | grep -q '^module\.eks\.aws_eks_cluster\.this\[0\]$'; then
+            if echo "$STATE_LIST" | grep -Fqx 'module.eks.aws_eks_cluster.this[0]'; then
 
               echo "EKS cluster is already managed by Terraform."
 
@@ -309,49 +244,6 @@ jobs:
 
           fi
 
-      # ============================================================
-      # SYNCHRONIZE EXISTING KMS ALIAS
-      # ============================================================
-      - name: Synchronize EKS KMS Alias
-        working-directory: infra/terraform
-        run: |
-          set -e
-
-          echo "=========================================="
-          echo "SYNCHRONIZING EKS KMS ALIAS"
-          echo "=========================================="
-
-          ALIAS_NAME="alias/eks/secure-cloud-cluster"
-
-          STATE_LIST=$(terraform state list 2>/dev/null || true)
-
-          if echo "$STATE_LIST" | grep -q '^module\.eks\.module\.kms\.aws_kms_alias\.this\["cluster"\]$'; then
-
-            echo "EKS KMS alias is already managed by Terraform."
-
-          elif aws kms list-aliases \
-            --region us-east-1 \
-            --query "Aliases[?AliasName=='$ALIAS_NAME'].AliasName" \
-            --output text | grep -q "$ALIAS_NAME"; then
-
-            echo "Existing KMS alias found:"
-            echo "$ALIAS_NAME"
-
-            echo "Importing existing KMS alias..."
-
-            terraform import \
-              -input=false \
-              'module.eks.module.kms.aws_kms_alias.this["cluster"]' \
-              "$ALIAS_NAME"
-
-            echo "EKS KMS alias successfully imported."
-
-          else
-
-            echo "KMS alias does not exist."
-            echo "Terraform will create it."
-
-          fi
 
       # ============================================================
       # TERRAFORM VALIDATE
@@ -360,6 +252,7 @@ jobs:
         working-directory: infra/terraform
         run: |
           terraform validate
+
 
       # ============================================================
       # TERRAFORM PLAN
@@ -370,6 +263,7 @@ jobs:
           terraform plan \
             -input=false \
             -out=tfplan
+
 
       # ============================================================
       # TERRAFORM APPLY
@@ -382,8 +276,9 @@ jobs:
             -auto-approve \
             tfplan
 
+
       # ============================================================
-      # SEND EMAIL IF DEPLOYMENT FAILS
+      # DEPLOYMENT FAILURE NOTIFICATION
       # ============================================================
       - name: Notify on Deploy Failure
         if: ${{ failure() }}
