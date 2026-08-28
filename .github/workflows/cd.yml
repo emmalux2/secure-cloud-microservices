@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       # ============================================================
       # CHECKOUT REPOSITORY
       # ============================================================
@@ -34,7 +35,7 @@ jobs:
           python-version: "3.11"
 
       # ============================================================
-      # INSTALL PYTHON DEPENDENCIES
+      # INSTALL DEPENDENCIES
       # ============================================================
       - name: Install Dependencies
         run: |
@@ -42,7 +43,7 @@ jobs:
           pip install boto3
 
       # ============================================================
-      # AUTHENTICATE GITHUB ACTIONS WITH AWS USING OIDC
+      # AUTHENTICATE WITH AWS USING OIDC
       # ============================================================
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v5
@@ -103,14 +104,12 @@ jobs:
 
             echo "ERROR: Terraform state bucket does not exist:"
             echo "$BUCKET"
-            echo ""
-            echo "Create this S3 bucket before Terraform can initialize."
             exit 1
 
           fi
 
       # ============================================================
-      # TERRAFORM INITIALIZATION
+      # TERRAFORM INIT
       # ============================================================
       - name: Terraform Init
         working-directory: infra/terraform
@@ -149,30 +148,9 @@ jobs:
             echo "Existing secret found:"
             echo "$SECRET_ARN"
 
-            echo "=========================================="
-            echo "CHECKING TERRAFORM STATE"
-            echo "=========================================="
+            echo "Secret is configured as a Terraform data source."
+            echo "No Terraform import is required."
 
-            STATE_LIST=$(terraform state list 2>/dev/null || true)
-
-            if echo "$STATE_LIST" | grep -q '^data\.aws_secretsmanager_secret\.jwt_access$'; then
-
-              echo "JWT secret is configured as a Terraform data source."
-
-            elif echo "$STATE_LIST" | grep -q '^aws_secretsmanager_secret\.jwt_access$'; then
-
-              echo "JWT secret is already managed as a Terraform resource."
-
-            else
-
-              echo "JWT secret is not present in Terraform state."
-              echo ""
-              echo "IMPORTANT:"
-              echo "Your secrets.tf uses a DATA SOURCE for this existing secret."
-              echo "Therefore Terraform import is NOT required."
-              echo "Terraform will read the existing secret directly from AWS."
-
-            fi
           fi
 
       # ============================================================
@@ -209,10 +187,6 @@ jobs:
             echo "ID: $WAF_ID"
             echo "Scope: $WAF_SCOPE"
 
-            echo "=========================================="
-            echo "CHECKING TERRAFORM STATE"
-            echo "=========================================="
-
             STATE_LIST=$(terraform state list 2>/dev/null || true)
 
             if echo "$STATE_LIST" | grep -q '^aws_wafv2_web_acl\.main$'; then
@@ -224,16 +198,9 @@ jobs:
               echo "WAF is NOT managed by Terraform."
               echo "Importing existing WAF..."
 
-              # Terraform AWS WAFv2 import format:
-              #
-              # ID/NAME/SCOPE
-              #
-              # Example:
-              # cd52500f-48be-40a6-a3a8-6774b74c3f40/main-waf/REGIONAL
-
               WAF_IMPORT_ID="${WAF_ID}/${WAF_NAME}/${WAF_SCOPE}"
 
-              echo "Terraform WAF import ID:"
+              echo "Terraform import ID:"
               echo "$WAF_IMPORT_ID"
 
               terraform import \
@@ -247,7 +214,7 @@ jobs:
           fi
 
       # ============================================================
-      # SYNCHRONIZE EXISTING WAF LOG GROUP
+      # SYNCHRONIZE WAF LOG GROUP
       # ============================================================
       - name: Synchronize WAF Log Group
         working-directory: infra/terraform
@@ -260,33 +227,27 @@ jobs:
 
           LOG_GROUP_NAME="aws-waf-logs-main"
 
-          if aws logs describe-log-groups \
+          STATE_LIST=$(terraform state list 2>/dev/null || true)
+
+          if echo "$STATE_LIST" | grep -q '^aws_cloudwatch_log_group\.waf_log_group$'; then
+
+            echo "WAF log group is already managed by Terraform."
+
+          elif aws logs describe-log-groups \
             --log-group-name-prefix "$LOG_GROUP_NAME" \
             --region us-east-1 \
             --query "logGroups[?logGroupName=='$LOG_GROUP_NAME'].logGroupName" \
             --output text | grep -q "$LOG_GROUP_NAME"; then
 
-            echo "Existing WAF log group found:"
-            echo "$LOG_GROUP_NAME"
+            echo "Existing WAF log group found."
+            echo "Importing..."
 
-            STATE_LIST=$(terraform state list 2>/dev/null || true)
+            terraform import \
+              -input=false \
+              aws_cloudwatch_log_group.waf_log_group \
+              "$LOG_GROUP_NAME"
 
-            if echo "$STATE_LIST" | grep -q '^aws_cloudwatch_log_group\.waf_log_group$'; then
-
-              echo "WAF log group is already managed by Terraform."
-
-            else
-
-              echo "Importing existing WAF log group..."
-
-              terraform import \
-                -input=false \
-                aws_cloudwatch_log_group.waf_log_group \
-                "$LOG_GROUP_NAME"
-
-              echo "WAF log group successfully imported."
-
-            fi
+            echo "WAF log group successfully imported."
 
           else
 
@@ -296,7 +257,7 @@ jobs:
           fi
 
       # ============================================================
-      # SYNCHRONIZE EXISTING EKS CLUSTER LOG GROUP
+      # SYNCHRONIZE EXISTING EKS CLOUDWATCH LOG GROUP
       # ============================================================
       - name: Synchronize EKS Cluster Log Group
         working-directory: infra/terraform
@@ -309,7 +270,13 @@ jobs:
 
           LOG_GROUP_NAME="/aws/eks/secure-cloud-cluster/cluster"
 
-          if aws logs describe-log-groups \
+          STATE_LIST=$(terraform state list 2>/dev/null || true)
+
+          if echo "$STATE_LIST" | grep -q '^module\.eks\.aws_cloudwatch_log_group\.this\[0\]$'; then
+
+            echo "EKS cluster log group is already managed by Terraform."
+
+          elif aws logs describe-log-groups \
             --log-group-name-prefix "$LOG_GROUP_NAME" \
             --region us-east-1 \
             --query "logGroups[?logGroupName=='$LOG_GROUP_NAME'].logGroupName" \
@@ -318,22 +285,62 @@ jobs:
             echo "Existing EKS cluster log group found:"
             echo "$LOG_GROUP_NAME"
 
-            STATE_LIST=$(terraform state list 2>/dev/null || true)
+            echo "Importing existing log group..."
 
-            if echo "$STATE_LIST" | grep -q '^module\.eks\.aws_cloudwatch_log_group\.this\[0\]$'; then
+            terraform import \
+              -input=false \
+              'module.eks.aws_cloudwatch_log_group.this[0]' \
+              "$LOG_GROUP_NAME"
 
-              echo "EKS cluster log group is already managed by Terraform."
-
-            else
-
-              echo "EKS cluster log group exists in AWS."
-              echo "Terraform module will reconcile this resource during plan."
-
-            fi
+            echo "EKS cluster log group successfully imported."
 
           else
 
             echo "EKS cluster log group does not exist."
+            echo "Terraform will create it."
+
+          fi
+
+      # ============================================================
+      # SYNCHRONIZE EXISTING KMS ALIAS
+      # ============================================================
+      - name: Synchronize EKS KMS Alias
+        working-directory: infra/terraform
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "SYNCHRONIZING EKS KMS ALIAS"
+          echo "=========================================="
+
+          ALIAS_NAME="alias/eks/secure-cloud-cluster"
+
+          STATE_LIST=$(terraform state list 2>/dev/null || true)
+
+          if echo "$STATE_LIST" | grep -q '^module\.eks\.module\.kms\.aws_kms_alias\.this\["cluster"\]$'; then
+
+            echo "EKS KMS alias is already managed by Terraform."
+
+          elif aws kms list-aliases \
+            --region us-east-1 \
+            --query "Aliases[?AliasName=='$ALIAS_NAME'].AliasName" \
+            --output text | grep -q "$ALIAS_NAME"; then
+
+            echo "Existing KMS alias found:"
+            echo "$ALIAS_NAME"
+
+            echo "Importing existing KMS alias..."
+
+            terraform import \
+              -input=false \
+              'module.eks.module.kms.aws_kms_alias.this["cluster"]' \
+              "$ALIAS_NAME"
+
+            echo "EKS KMS alias successfully imported."
+
+          else
+
+            echo "KMS alias does not exist."
             echo "Terraform will create it."
 
           fi
