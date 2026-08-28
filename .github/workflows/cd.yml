@@ -207,6 +207,15 @@ jobs:
         run: |
           set -e
 
+      # ============================================================
+      # SYNCHRONIZE EXISTING WAF
+      # ============================================================
+
+      - name: Synchronize Existing WAF
+        working-directory: infra/terraform
+        run: |
+          set -e
+
           echo "=========================================="
           echo "SYNCHRONIZING EXISTING WAF"
           echo "=========================================="
@@ -247,6 +256,7 @@ jobs:
 
             fi
           fi
+
 
 
 
