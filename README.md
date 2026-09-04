@@ -1,22 +1,46 @@
-# SecureCloud
-A two-microservice project that shows how to build, secure, deploy, and monitor a real cloud application written so a beginner can follow every step[cite: 1].
+# SecureCloud — Microservices Architecture
 
-## What's iinside?h
-- **auth-service**: logs users in/out and hands out digital "wristbands" (JWT tokens) that prove who you are[cite: 1].
-- **resource-service**: a small notes API that only lets you in if you have a valid wristband[cite: 1].
+A microservices project showing how to build, secure, and containerize a modern cloud application.
 
-## Run it on your laptop (no cloud account needed)
-1. Install Docker Desktop[cite: 1].
-2. Clone this repo[cite: 1].
-3. Run: `docker compose up --build`[cite: 1]
-4. auth-service: `http://localhost:4000` | resource-service: `http://localhost:8000`[cite: 1]
+---
 
-## Try it
-1. Create an account[cite: 1]:
-   `curl -X POST localhost:4000/auth/register -H "Content-Type: application/json" -d '{"email":"me@example.com","password":"correct-horse-battery-staple"}'`[cite: 1]
-2. Log in, get a token[cite: 1]:
-   `curl -X POST localhost:4000/auth/login -H "Content-Type: application/json" -d '{"email":"me@example.com","password":"correct-horse-battery-staple"}'`[cite: 1]
-3. Use token to create a note[cite: 1]:
-   `curl -X POST localhost:8000/notes/ -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" -d '{"text":"my first secure note"}'`[cite: 1]
-#end for now 
-kkh
+## What is Built in Week 1?
+
+* auth-service: Node.js and Express application handling identity management and server health checks.
+* postgres-db: Relational database storing user records and hashed session tokens with persistent Docker volume storage.
+* Private Bridge Network: Isolated Docker container network that lets microservices communicate securely without exposing database ports to the outside world.
+
+---
+
+## Run It Locally (No Cloud Account Needed)
+
+1. Install Docker Desktop on your machine.
+2. Clone this repository 
+3. Copy the example environment file to set up local variables:
+cp .env.example .env
+4. Start the services:
+docker compose up -d --build
+
+---
+
+## Verification & Testing Guide
+
+You can verify that the Week 1 infrastructure, container network, and database connection are working properly with these commands.
+
+1. Check Running Containers
+Confirm that both services are running:
+docker compose ps
+Expected result: Both auth-service and postgres-db display state as Up.
+2. Verify App & Database Health
+Test that the Node.js app can connect to PostgreSQL:
+curl -i http://localhost:4000/health
+Expected response:
+HTTP/1.1 200 OK
+{"status":"healthy","db":"connected"}
+3. Inspect Database Tables
+Check that the database schema initialized correctly on boot:
+docker compose exec postgres-db psql -U postgres -d securecloud -c "\dt"
+Expected result: A list showing the users and refresh_tokens tables.
+4. Teardown
+To stop the containers and clear local data volumes:
+docker compose down -v
