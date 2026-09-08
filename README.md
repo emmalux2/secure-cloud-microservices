@@ -335,23 +335,7 @@ System Architecture
 
 
 
-+-----------------------------------------------------------------+
-|                           Client / UI                           |
-+-----------------------------------------------------------------+
-     |                       |                        |
- 1. Login / Refresh      2. Access Protected      3. Logout
-     |                      Resource                  |
-     v                       v                        v
-+------------------+    +------------------+    +------------------+
-|   Auth Service   |    |   Resource API   |    |   Auth Service   |
-| (Express/Node.js)|    |    (FastAPI)     |    | (Express/Node.js)|
-+------------------+    +------------------+    +------------------+
-     |        |              |                        |
-     |        |              | Verify JWT             | Revoke Session
-     v        v              v                        v
-+--------+ +-------+    (Stateless Signature)   +--------+ +-------+
-| Postgres| | Redis |                           | Postgres| | Redis |
-+--------+ +-------+                            +--------+ +-------+
+<img width="734" height="546" alt="image" src="https://github.com/user-attachments/assets/a7296797-d93b-4330-aedb-757879098581" />
 
 
 
