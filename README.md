@@ -140,7 +140,11 @@ To help non-technical team members picture how this works, think of a secure off
 •	The Master Vault (PostgreSQL): This is our permanent database. It holds user profiles and security records safely so that account information stays intact even if the server restarts.
 
 •	The Verification Pipeline (db.js): This acts as an automated connection manager. It opens and closes fast pipelines to the database whenever the application needs to create or verify user accounts.
+
+
 System Architecture
+
+
 
 ,,,<img width="532" height="577" alt="image" src="https://github.com/user-attachments/assets/6dc2fc13-dbf3-4b4a-87f9-06215f9a3452" />
 
@@ -306,5 +310,246 @@ pool.query("SELECT id FROM users WHERE email = $1", [email]);
 
 This forces PostgreSQL to treat user input strictly as literal data values rather than executable SQL commands, neutralizing SQL Injection attacks.
 
+
+
+
+
+WEEK 4: Advanced Auth Lifecycle, Token Management, and Session Handling
+Project Overview
+In Week 4, we extended our authentication microservice to handle the complete session lifecycle. We implemented stateless JSON Web Tokens (JWTs) for authorization, long-lived refresh token rotation, token revocation via logout, and Redis caching for session and rate-limit tracking.
+
+To help non-technical team members picture how this works, think of an amusement park pass system:
+
+The Access Pass (Access Token): A short-lived wristband valid for 15 minutes. Park attendants at individual rides inspect the wristband's expiration timestamp directly without calling headquarters.
+
+The Renewal Voucher (Refresh Token): A long-lived claim receipt stored in our central database vault. When your 15-minute wristband expires, you present this voucher to get a new wristband without typing in your password again.
+
+The Cancellation Desk (/auth/logout): When you log out, we destroy your renewal voucher in the central database. You cannot get any future wristbands.
+
+The Fast Security Desk (Redis): A ultra-fast, in-memory cache used for rapid session lookups and rate-limiting to prevent brute-force attacks.
+
+
+
+System Architecture
+
+
+
+
++-----------------------------------------------------------------+
+|                           Client / UI                           |
++-----------------------------------------------------------------+
+     |                       |                        |
+ 1. Login / Refresh      2. Access Protected      3. Logout
+     |                      Resource                  |
+     v                       v                        v
++------------------+    +------------------+    +------------------+
+|   Auth Service   |    |   Resource API   |    |   Auth Service   |
+| (Express/Node.js)|    |    (FastAPI)     |    | (Express/Node.js)|
++------------------+    +------------------+    +------------------+
+     |        |              |                        |
+     |        |              | Verify JWT             | Revoke Session
+     v        v              v                        v
++--------+ +-------+    (Stateless Signature)   +--------+ +-------+
+| Postgres| | Redis |                           | Postgres| | Redis |
++--------+ +-------+                            +--------+ +-------+
+
+
+
+
+    
+System Requirements
+Make sure you have the following installed and running:
+
+Docker and Docker Compose
+
+Node.js version 18 or higher
+
+cURL or Postman to test endpoints
+
+Application Code
+1. Unified Authentication Router (src/routes/auth.js)
+This handler manages login, token generation, token rotation, and session destruction.
+
+JavaScript
+import express from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import pool from '../db.js';
+
+const router = express.Router();
+
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1)
+});
+
+// Plain English: Login route verifies credentials and issues Access + Refresh tokens
+router.post('/login', async (req, res) => {
+  try {
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid input parameters' });
+    }
+
+    const { email, password } = parsed.data;
+
+    // Step 1: Look up user profile in PostgreSQL
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const user = result.rows[0];
+
+    // Step 2: Compare password hash using bcrypt
+    const validPassword = await bcrypt.compare(password, user.password_hash);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Step 3: Issue short-lived 15-minute Access Token
+    const accessToken = jwt.sign(
+      { userId: user.id, email: user.email },
+      process.env.JWT_SECRET || 'supersecretkey',
+      { expiresIn: '15m' }
+    );
+
+    // Step 4: Issue long-lived 7-day Refresh Token
+    const refreshToken = jwt.sign(
+      { userId: user.id },
+      process.env.REFRESH_TOKEN_SECRET || 'refreshsecretkey',
+      { expiresIn: '7d' }
+    );
+
+    // Step 5: Save refresh token hash into PostgreSQL for active session tracking
+    await pool.query(
+      'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL \'7 days\')',
+      [user.id, refreshToken]
+    );
+
+    return res.json({
+      message: 'Login successful',
+      accessToken,
+      refreshToken
+    });
+  } catch (err) {
+    console.error('Login Error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Plain English: Token Refresh route exchanges valid refresh token for a new access token
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token required' });
+    }
+
+    // Step 1: Verify refresh token signature
+    const payload = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET || 'refreshsecretkey');
+
+    // Step 2: Ensure refresh token exists in database session store
+    const tokenRecord = await pool.query(
+      'SELECT * FROM refresh_tokens WHERE user_id = $1 AND token_hash = $2',
+      [payload.userId, refreshToken]
+    );
+
+    if (tokenRecord.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid or revoked refresh token' });
+    }
+
+    // Step 3: Generate brand new 15-minute Access Token
+    const newAccessToken = jwt.sign(
+      { userId: payload.userId },
+      process.env.JWT_SECRET || 'supersecretkey',
+      { expiresIn: '15m' }
+    );
+
+    return res.json({ accessToken: newAccessToken });
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
+// Plain English: Logout route revokes the refresh token from the database
+router.post('/logout', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (refreshToken) {
+      await pool.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [refreshToken]);
+    }
+    return res.status(200).json({ message: 'Logged out successfully' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Logout failed' });
+  }
+});
+
+export default router;
+Complete End-to-End Test Script (test-auth-flow.sh)
+This script automates registration, login, resource access, token refresh, logout, and token behavior checks.
+
+Bash
+#!/usr/bin/env bash
+set -e
+
+AUTH_URL="http://localhost:4000"
+
+echo "=== 1. Registering Test User ==="
+curl -s -X POST "$AUTH_URL/auth/register" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"testuser@example.com","password":"Password12345!"}' || true
+
+echo -e "\n=== 2. Logging In ==="
+LOGIN_RES=$(curl -s -X POST "$AUTH_URL/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"testuser@example.com","password":"Password12345!"}')
+
+ACCESS_TOKEN=$(echo $LOGIN_RES | grep -o '"accessToken":"[^"]*' | grep -o '[^"]*$')
+REFRESH_TOKEN=$(echo $LOGIN_RES | grep -o '"refreshToken":"[^"]*' | grep -o '[^"]*$')
+
+echo "Access token acquired successfully."
+
+echo -e "\n=== 3. Accessing Protected Resource ==="
+curl -s -i -X GET "$AUTH_URL/protected" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+
+echo -e "\n=== 4. Refreshing Token ==="
+REFRESH_RES=$(curl -s -X POST "$AUTH_URL/auth/refresh" \
+  -H "Content-Type: application/json" \
+  -d "{\"refreshToken\":\"$REFRESH_TOKEN\"}")
+
+NEW_ACCESS_TOKEN=$(echo $REFRESH_RES | grep -o '"accessToken":"[^"]*' | grep -o '[^"]*$')
+
+echo -e "\n=== 5. Logging Out ==="
+curl -s -X POST "$AUTH_URL/auth/logout" \
+  -H "Content-Type: application/json" \
+  -d "{\"refreshToken\":\"$REFRESH_TOKEN\"}"
+
+echo -e "\n=== 6. Verifying Token Behavior After Logout ==="
+curl -s -i -X GET "$AUTH_URL/protected" \
+  -H "Authorization: Bearer $NEW_ACCESS_TOKEN"
+
+echo -e "\n\nAll Week 4 test phases completed successfully!"
+How to Execute
+Make the script executable:
+
+Bash
+chmod +x test-auth-flow.sh
+Run the test suite:
+
+Bash
+./test-auth-flow.sh
+Important Architectural Note: Stateless JWT Behavior
+During testing, you will notice that an Access Token remains valid for protected resources even after /auth/logout is called.
+
+Why this occurs:
+
+Access tokens are stateless. Resource APIs verify tokens locally using cryptographic signature checks without calling PostgreSQL or Redis.
+
+Logout revokes the Refresh Token from the database.
+
+Once the active 15-minute Access Token expires, the user is permanently locked out because they cannot request any new access tokens without logging in again.
 
 
