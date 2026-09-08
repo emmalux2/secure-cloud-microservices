@@ -128,13 +128,21 @@ Week 2 is complete and verified. The authentication service is containerized, st
 
 
 WEEEK 3: Database Persistence and User Authentication Service
+
 Project Overview
+
 During Week 3, we transitioned our authentication service away from temporary in-memory storage to a permanent PostgreSQL database. We also added secure account registration using password hashing powered by bcrypt.
+
 To help non-technical team members picture how this works, think of a secure office building:
+
 •	The Registration Desk (/auth/register): When new visitors sign up, we verify their information and log them into our official guest ledger. We never store raw building keys or passwords. Instead, we scramble them into a unique digital fingerprint called a bcrypt hash.
+
 •	The Master Vault (PostgreSQL): This is our permanent database. It holds user profiles and security records safely so that account information stays intact even if the server restarts.
+
 •	The Verification Pipeline (db.js): This acts as an automated connection manager. It opens and closes fast pipelines to the database whenever the application needs to create or verify user accounts.
 System Architecture
+
+
 +-----------------------------------+
 |            Client / UI            |
 +-----------------------------------+
@@ -154,12 +162,16 @@ System Architecture
 +-----------------------------------+
 
 
+
+
 System Requirements
 Make sure you have the following installed on your machine:
 •	Docker and Docker Compose for running containerized database and app environments
 •	Node.js version 18 or higher
 •	cURL or Postman to test API endpoints
+
 Database Schema Setup
+
 Our authentication service relies on two main SQL tables in PostgreSQL:
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -167,6 +179,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   id SERIAL PRIMARY KEY,
@@ -176,19 +189,23 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+
 Application Code
 1. Database Connection Manager (src/db.js)
 This module manages our database connection pool. Instead of opening a brand new database connection for every incoming login, it maintains a reusable set of connections to keep performance fast.
 
 
 import pg from 'pg';
+
 const { Pool } = pg;
+
 
 // Plain English: Sets up a reusable pathway connecting Node.js to PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@postgres-db:5432/postgres'
 });
 export default pool;
+
 
 2. User Registration Handler (src/routes/register.js)
 This module manages new sign-ups. It checks the incoming payload, screens for existing emails, securely hashes the password, and saves the new account record to PostgreSQL.
@@ -197,13 +214,16 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import pool from '../db.js';
 
+
 const router = express.Router();
+
 
 // Plain English: Require a valid email and a password of at least 12 characters
 const schema = z.object({
   email: z.string().email(),
   password: z.string().min(12, "Password must be at least 12 characters")
 });
+
 
 router.post("/", async (req, res) => {
   try {
@@ -220,10 +240,12 @@ router.post("/", async (req, res) => {
     if (existing.rows.length > 0) {
       return res.status(409).json({ error: "Registration failed: User already exists" });
     }
+    
 
     // Step 3: Hash the plain text password with 12 salt rounds
     // Plain English: We never save raw passwords; we turn them into un-reversible strings
     const hash = await bcrypt.hash(password, 12);
+    
 
     // Step 4: Insert the new user into PostgreSQL
     await pool.query(
@@ -231,8 +253,10 @@ router.post("/", async (req, res) => {
       [email, hash]
     );
 
+
     // Step 5: Send success response
     return res.status(201).json({ message: "Account created successfully" });
+    
 
   } catch (err) {
     console.error("Register Error:", err);
@@ -240,13 +264,16 @@ router.post("/", async (req, res) => {
   }
 });
 
+
 export default router;
+
 
 Step-by-Step Execution Guide
 Step 1: Launch Containers
 Start the node application and PostgreSQL database containers together:
 Bash
 docker compose up -d –build
+
 
 Step 2: Apply Database Tables
 Apply our SQL tables directly into the running PostgreSQL container:
@@ -257,6 +284,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   id SERIAL PRIMARY KEY,
@@ -272,21 +300,29 @@ Run a cURL command to register a test user:
 curl -i -X POST http://localhost:4000/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"developer@example.com","password":"Password12345!"}'
+  
 
 Expected Response:
+
 HTTP
 HTTP/1.1 201 Created
 Content-Type: application/json; charset=utf-8
 
 {"message":"Account created successfully"}
+
 Key Security Concepts
+
 Why We Hash Passwords
+
 If an unencrypted database gets leaked, attackers instantly steal everyone's plain text passwords. Using bcrypt with 12 salt rounds converts passwords into scrambled strings that cannot be reversed. Adding a unique salt ensures that two users with identical passwords still end up with completely different hashes.
+
 Preventing SQL Injection
+
 Notice how we query the database using parameter markers like $1 rather than stitching raw strings together:
 
 JavaScript:
 pool.query("SELECT id FROM users WHERE email = $1", [email]);
+
 
 This forces PostgreSQL to treat user input strictly as literal data values rather than executable SQL commands, neutralizing SQL Injection attacks.
 
