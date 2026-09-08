@@ -1,4 +1,4 @@
-WEEK 1
+<img width="574" height="553" alt="image" src="https://github.com/user-attachments/assets/3839af65-e129-4517-aa5a-b52cc5b39ee9" />WEEK 1
 # SecureCloud — Microservices Architecture
 
 A microservices project showing how to build, secure, and containerize a modern cloud application.
@@ -161,6 +161,7 @@ System Architecture
 |  - refresh_tokens                 |
 +-----------------------------------+
 
+,,,<img width="532" height="577" alt="image" src="https://github.com/user-attachments/assets/6dc2fc13-dbf3-4b4a-87f9-06215f9a3452" />
 
 
 
