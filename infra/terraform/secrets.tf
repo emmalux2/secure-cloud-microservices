@@ -18,7 +18,7 @@ data "aws_secretsmanager_secret" "jwt_access" {
 
 data "aws_iam_policy_document" "auth_service_trust" {
   statement {
-    effect  = "Allow"
+    effect = "Allow"
 
     actions = [
       "sts:AssumeRoleWithWebIdentity"

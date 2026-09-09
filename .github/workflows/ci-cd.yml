@@ -1,0 +1,107 @@
+name: SecureCloud CI/CD & Security Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  # -------------------------------------------------------------
+  # Job 1: Static Application Security Testing (SAST) & Linting
+  # -------------------------------------------------------------
+  sast-and-lint:
+    name: SAST & Repository Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy Repository Vulnerability & Secret Scan (SAST)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+  # -------------------------------------------------------------
+  # Job 2: Build & Container Security Scanning
+  # -------------------------------------------------------------
+  container-security:
+    name: Build & Scan Docker Images
+    needs: sast-and-lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build Auth Service Image
+      - name: Build Auth Service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/auth-service
+          load: true
+          tags: securecloud/auth-service:${{ github.sha }}
+
+      # Scan Auth Service Image
+      - name: Scan Auth Service Container (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'securecloud/auth-service:${{ github.sha }}'
+          format: 'table'
+          exit-code: '0' # Set to 1 to break pipeline on High/Critical
+          severity: 'CRITICAL,HIGH'
+
+      # Build Resource Service Image
+      - name: Build Resource Service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/resource-service
+          load: true
+          tags: securecloud/resource-service:${{ github.sha }}
+
+      # Scan Resource Service Image
+      - name: Scan Resource Service Container (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'securecloud/resource-service:${{ github.sha }}'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+  # -------------------------------------------------------------
+  # Job 3: Integration Testing via Docker Compose
+  # -------------------------------------------------------------
+  integration-test:
+    name: Docker Compose Integration Test
+    needs: container-security
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Create gateway directory if missing
+        run: mkdir -p gateway
+
+      - name: Launch Stack with Docker Compose
+        run: docker compose up -d --build
+
+      - name: Wait for services to become healthy
+        run: sleep 15
+
+      - name: Execute Automated Authentication & Gateway Tests
+        run: |
+          chmod +x test-auth-flow.sh
+          ./test-auth-flow.sh
+
+      - name: Tear Down Stack
+        if: always()
+        run: docker compose down -v
