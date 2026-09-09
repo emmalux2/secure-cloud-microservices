@@ -1,12 +1,15 @@
 const express = require("express");
+const cookieParser = require("cookie-parser");
 const helmet = require("helmet");
 const client = require("prom-client");
 const registerRoute = require("./routes/register");
 const loginRoute = require("./routes/login");
 const refreshRoute = require("./routes/refresh");
+const logoutRoute = require("./routes/logout");
 const { rateLimiter } = require("./middleware/rateLimiter");
 const app = express();
 app.use(express.json({ limit: "10kb" }));
+app.use(cookieParser());
 app.use(helmet());
 app.disable("x-powered-by");
 
@@ -42,6 +45,7 @@ app.get("/healthz", (req, res) => res.status(200).json({ status: "ok" }));
 app.use("/auth/register", rateLimiter, registerRoute);
 app.use("/auth/login", rateLimiter, loginRoute);
 app.use("/auth/refresh", refreshRoute);
+app.use("/auth/logout", logoutRoute);
 
 const PORT = process.env.PORT || 4000;
 

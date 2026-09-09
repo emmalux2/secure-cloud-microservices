@@ -2,7 +2,13 @@ const jwt = require("jsonwebtoken");
 const { getSecret } = require("./secrets");
 
 function signAccessToken(payload) {
-  return jwt.sign(payload, getSecret("JWT_ACCESS_SECRET"), {
+  // Ensure the token payload explicitly contains sub, email, and role
+  const tokenPayload = {
+    ...payload,
+    role: payload.role || "user"
+  };
+
+  return jwt.sign(tokenPayload, getSecret("JWT_ACCESS_SECRET"), {
     expiresIn: "15m",
     algorithm: "HS256"
   });

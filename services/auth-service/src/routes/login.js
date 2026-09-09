@@ -18,12 +18,12 @@ router.post("/", async (req, res) => {
     return res.status(401).json({ error: "Invalid email or password" });
   }
 
-  const accessToken = signAccessToken({ sub: user.id, email: user.email });
-  const refreshToken = signRefreshToken({ sub: user.id });
+  const accessToken = signAccessToken({ sub: user.id, email: user.email, role: user.role });
+  const refreshToken = signRefreshToken({ sub: user.id, email: user.email, role: user.role });
 
   res.cookie("refresh_token", refreshToken, {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
     maxAge: 7 * 24 * 60 * 60 * 1000
   });

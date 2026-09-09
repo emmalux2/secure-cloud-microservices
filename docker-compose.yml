@@ -1,26 +1,72 @@
-version: "3.9"
 services:
+  api-gateway:
+    image: nginx:alpine
+    container_name: api-gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - auth-service
+      - resource-service
+
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: securecloud
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./services/auth-service/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  redis-cache:
+    image: redis:7-alpine
+    container_name: redis-cache
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   auth-service:
     build: ./services/auth-service
-    ports: ["4000:4000"]
+    container_name: auth-service
+    ports:
+      - "4000:4000"
     environment:
-      JWT_ACCESS_SECRET: dev-only-change-me
-      JWT_REFRESH_SECRET: dev-only-change-me-too
-      DATABASE_URL: postgres://postgres:postgres@auth-db:5432/authdb
-    depends_on: [auth-db]
+      PORT: 4000
+      DATABASE_URL: postgres://postgres:postgrespassword@postgres-db:5432/securecloud
+      REDIS_URL: redis://redis-cache:6379
+      JWT_ACCESS_SECRET: supersecretkey
+      JWT_REFRESH_SECRET: superrefreshsecretkey
+    volumes:
+      - ./services/auth-service:/app
+      - /app/node_modules
+    depends_on:
+      postgres-db:
+        condition: service_started
+      redis-cache:
+        condition: service_healthy
 
   resource-service:
     build: ./services/resource-service
-    ports: ["8000:8000"]
+    container_name: resource-service
+    ports:
+      - "8000:8000"
     environment:
-      JWT_ACCESS_SECRET: dev-only-change-me
-
-  auth-db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: authdb
-    volumes: ["auth-db-data:/var/lib/postgresql/data"]
+      JWT_ACCESS_SECRET: supersecretkey
+      REDIS_URL: redis://redis-cache:6379
+    volumes:
+      - ./services/resource-service:/app
+    depends_on:
+      redis-cache:
+        condition: service_healthy
 
 volumes:
-  auth-db-data:
+  pgdata:
