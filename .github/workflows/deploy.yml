@@ -1,0 +1,161 @@
+name: Deploy Infrastructure and Kubernetes
+
+on:
+  pull_request:
+    paths:
+      - "infra/terraform/**"
+      - "helm/**"
+      - "monitoring/**"
+      - "services/**"
+      - ".github/workflows/deploy.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/terraform/**"
+      - "helm/**"
+      - "monitoring/**"
+      - "services/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: secure-cloud-cluster-v2
+  TF_WORKING_DIR: infra/terraform
+
+concurrency:
+  group: securecloud-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    name: Terraform plan/apply
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'pull_request' && 'plan' || 'production' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform format check
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -diff
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false -reconfigure
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -input=false -no-color
+
+      - name: Terraform apply
+        if: github.event_name != 'pull_request'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -input=false -auto-approve
+
+  kubernetes:
+    name: Deploy application and observability
+    needs: terraform
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Configure kubectl for EKS
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+
+      - name: Verify cluster access
+        run: kubectl get nodes
+
+      - name: Create ECR repositories
+        run: |
+          aws ecr describe-repositories --repository-names securecloud/auth-service >/dev/null 2>&1 || \
+            aws ecr create-repository --repository-name securecloud/auth-service
+          aws ecr describe-repositories --repository-names securecloud/resource-service >/dev/null 2>&1 || \
+            aws ecr create-repository --repository-name securecloud/resource-service
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push service images
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$REGISTRY/securecloud/auth-service:$IMAGE_TAG" services/auth-service
+          docker push "$REGISTRY/securecloud/auth-service:$IMAGE_TAG"
+          docker build -t "$REGISTRY/securecloud/resource-service:$IMAGE_TAG" services/resource-service
+          docker push "$REGISTRY/securecloud/resource-service:$IMAGE_TAG"
+
+      - name: Deploy application chart
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          helm upgrade --install securecloud-release ./helm/securecloud \
+            --namespace securecloud \
+            --create-namespace \
+            --set imagePullPolicy=Always \
+            --set authService.image="$REGISTRY/securecloud/auth-service:$IMAGE_TAG" \
+            --set resourceService.image="$REGISTRY/securecloud/resource-service:$IMAGE_TAG" \
+            --wait \
+            --timeout 10m
+
+      - name: Install observability chart
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+            --namespace monitoring \
+            --create-namespace \
+            --values monitoring/kube-prometheus-stack-values.yaml \
+            --wait \
+            --timeout 10m
+
+      - name: Apply monitoring resources
+        run: |
+          kubectl apply -f monitoring/securecloud-servicemonitor.yaml
+          kubectl apply -f monitoring/securecloud-prometheusrule.yaml
+
+      - name: Verify rollouts
+        run: |
+          kubectl rollout status deployment --namespace securecloud --timeout=5m
+          kubectl get pods --namespace monitoring
