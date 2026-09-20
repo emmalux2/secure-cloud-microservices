@@ -1,0 +1,76 @@
+name: Destroy SecureCloud Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type DESTROY to confirm teardown
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  TF_WORKING_DIR: infra/terraform
+
+jobs:
+  destroy:
+    name: Destroy Terraform infrastructure
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Require explicit confirmation
+        if: inputs.confirmation != 'DESTROY'
+        run: |
+          echo "Type DESTROY exactly to confirm teardown."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false -reconfigure
+
+      - name: Terraform destroy plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -destroy -input=false -out=destroy.tfplan -no-color
+
+      - name: Terraform destroy
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -input=false destroy.tfplan
+
+      - name: Delete ECR repositories
+        run: |
+          for repository in securecloud/auth-service securecloud/resource-service; do
+            aws ecr delete-repository \
+              --repository-name "$repository" \
+              --force \
+              --region "$AWS_REGION" || true
+          done
+
+      - name: Delete JWT secret
+        run: |
+          aws secretsmanager delete-secret \
+            --secret-id secure-cloud/jwt-access-secret \
+            --force-delete-without-recovery \
+            --region "$AWS_REGION" || true
