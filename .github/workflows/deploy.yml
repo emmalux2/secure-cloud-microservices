@@ -40,6 +40,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Debug OIDC Token Claims
+        run: |
+          echo "=== CHECKING ROLE ARN ==="
+          echo "Role ARN: '${{ vars.AWS_ROLE_ARN }}'"
+
+          echo "=== FETCHING OIDC TOKEN ==="
+          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+
+          echo "=== DECODED TOKEN CLAIMS ==="
+          jq -R 'split(".") | .[1] | @base64d | fromjson' <<< "$TOKEN"
 
       - name: Configure AWS credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v4
