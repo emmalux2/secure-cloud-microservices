@@ -1,0 +1,10 @@
+node_modules/
+__pycache__/
+*.pyc
+*.tar
+.docker_temp_*
+cookies.txt
+.env
+.terraform/
+*.tfstate
+*.tfstate.*
