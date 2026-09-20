@@ -43,27 +43,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials via Direct STS Call
-        run: |
-          echo "=== 1. FETCHING OIDC TOKEN ==="
-          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-          echo "$OIDC_TOKEN" > /tmp/web_identity_token
-
-          echo "=== 2. DECODED TOKEN CLAIMS ==="
-          jq -R 'split(".") | .[1] | @base64d | fromjson' <<< "$OIDC_TOKEN"
-
-          echo "=== 3. DIRECT AWS STS CALL ==="
-          CREDENTIALS=$(aws sts assume-role-with-web-identity \
-            --role-arn "${{ env.AWS_ROLE_ARN }}" \
-            --role-session-name "gh-actions-session" \
-            --web-identity-token file:///tmp/web_identity_token \
-            --duration-seconds 3600 \
-            --region "${{ env.AWS_REGION }}")
-
-          echo "AWS_ACCESS_KEY_ID=$(echo $CREDENTIALS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDENTIALS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $CREDENTIALS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
-          echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
@@ -105,27 +89,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials via Direct STS Call
-        run: |
-          echo "=== 1. FETCHING OIDC TOKEN ==="
-          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-          echo "$OIDC_TOKEN" > /tmp/web_identity_token
-
-          echo "=== 2. DECODED TOKEN CLAIMS ==="
-          jq -R 'split(".") | .[1] | @base64d | fromjson' <<< "$OIDC_TOKEN"
-
-          echo "=== 3. DIRECT AWS STS CALL ==="
-          CREDENTIALS=$(aws sts assume-role-with-web-identity \
-            --role-arn "${{ env.AWS_ROLE_ARN }}" \
-            --role-session-name "gh-actions-session" \
-            --web-identity-token file:///tmp/web_identity_token \
-            --duration-seconds 3600 \
-            --region "${{ env.AWS_REGION }}")
-
-          echo "AWS_ACCESS_KEY_ID=$(echo $CREDENTIALS | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $CREDENTIALS | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $CREDENTIALS | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
-          echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
