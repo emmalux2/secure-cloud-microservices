@@ -31,44 +31,17 @@ env:
   AWS_REGION: us-east-1
   EKS_CLUSTER_NAME: secure-cloud-cluster-v2
   TF_WORKING_DIR: infra/terraform
-  AWS_ROLE_ARN: arn:aws:iam::797776210271:role/SecureCloudGitHubActionsRole
 
 concurrency:
   group: securecloud-deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-
-  # ============================================================
-  # TEMPORARY OIDC DEBUG
-  # ============================================================
-  oidc-debug:
-    name: Debug GitHub OIDC Claims
-    runs-on: ubuntu-latest
-
-    environment: ${{ github.event_name == 'pull_request' && 'plan' || 'production' }}
-
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-
-      - name: Checkout Repository
-        uses: actions/checkout@v5
-
-      - name: Debug OIDC Token Claims
-        uses: github/actions-oidc-debugger@main
-
-
   # ============================================================
   # TERRAFORM
   # ============================================================
   terraform:
     name: Terraform Plan & Apply
-
-    needs:
-      - oidc-debug
 
     runs-on: ubuntu-latest
 
