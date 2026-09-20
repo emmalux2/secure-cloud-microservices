@@ -46,9 +46,6 @@ jobs:
     name: Debug GitHub OIDC Claims
     runs-on: ubuntu-latest
 
-    # This is important because your real Terraform job
-    # uses the "plan" environment for pull requests and
-    # "production" for pushes.
     environment: ${{ github.event_name == 'pull_request' && 'plan' || 'production' }}
 
     permissions:
@@ -56,6 +53,7 @@ jobs:
       id-token: write
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v5
 
@@ -94,45 +92,60 @@ jobs:
       - name: Configure AWS Credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
       # --------------------------------------------------------
-      # Verify AWS identity
+      # Verify AWS Identity
       # --------------------------------------------------------
       - name: Verify AWS Identity
         run: |
           aws sts get-caller-identity
 
       # --------------------------------------------------------
-      # Terraform
+      # Setup Terraform
       # --------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
+      # --------------------------------------------------------
+      # Terraform Format
+      # --------------------------------------------------------
       - name: Terraform Format Check
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform fmt -check -diff
 
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform init -input=false -reconfigure
 
+      # --------------------------------------------------------
+      # Terraform Validate
+      # --------------------------------------------------------
       - name: Terraform Validate
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform validate
 
+      # --------------------------------------------------------
+      # Terraform Plan
+      # --------------------------------------------------------
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform plan -input=false -no-color
 
+      # --------------------------------------------------------
+      # Terraform Apply
+      # --------------------------------------------------------
       - name: Terraform Apply
         if: github.event_name != 'pull_request'
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -173,12 +186,12 @@ jobs:
       - name: Configure AWS Credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
       # --------------------------------------------------------
-      # Verify AWS identity
+      # Verify AWS Identity
       # --------------------------------------------------------
       - name: Verify AWS Identity
         run: |
@@ -237,7 +250,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       # --------------------------------------------------------
-      # Build and push Auth Service
+      # Build and Push Auth Service
       # --------------------------------------------------------
       - name: Build and Push Auth Service
         uses: docker/build-push-action@v6
@@ -249,7 +262,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       # --------------------------------------------------------
-      # Build and push Resource Service
+      # Build and Push Resource Service
       # --------------------------------------------------------
       - name: Build and Push Resource Service
         uses: docker/build-push-action@v6
@@ -261,13 +274,12 @@ jobs:
           cache-to: type=gha,mode=max
 
       # --------------------------------------------------------
-      # Deploy application
+      # Deploy Application
       # --------------------------------------------------------
       - name: Deploy Application Chart
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-
         run: |
           helm upgrade --install securecloud-release ./helm/securecloud \
             --namespace securecloud \
@@ -297,7 +309,7 @@ jobs:
             --timeout 10m
 
       # --------------------------------------------------------
-      # Monitoring resources
+      # Monitoring Resources
       # --------------------------------------------------------
       - name: Apply Monitoring Custom Resources
         run: |
@@ -308,7 +320,7 @@ jobs:
             -f monitoring/securecloud-prometheusrule.yaml
 
       # --------------------------------------------------------
-      # Verify cluster
+      # Verify Cluster
       # --------------------------------------------------------
       - name: Verify Rollouts & Cluster Health
         run: |
@@ -318,4 +330,3 @@ jobs:
 
           kubectl get pods \
             --namespace monitoring
-```
