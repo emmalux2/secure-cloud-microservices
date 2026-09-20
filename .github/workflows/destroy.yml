@@ -40,174 +40,120 @@ jobs:
   # TERRAFORM
   # ============================================================
   terraform:
-    name: Terraform plan/apply
+    name: Infrastructure (Terraform)
     runs-on: ubuntu-latest
-
     environment: ${{ github.event_name == 'pull_request' && 'plan' || 'production' }}
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      # --------------------------------------------------------
-      # AWS OIDC
-      # --------------------------------------------------------
-      - name: Configure AWS credentials with OIDC
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
-      # --------------------------------------------------------
-      # Verify AWS authentication
-      # --------------------------------------------------------
-      - name: Verify AWS identity
-        run: |
-          aws sts get-caller-identity
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
 
-      # --------------------------------------------------------
-      # Terraform
-      # --------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
-      - name: Terraform format check
+      - name: Terraform Format Check
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: |
-          terraform fmt -check -diff
+        run: terraform fmt -check -diff
 
-      - name: Terraform init
+      - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: |
-          terraform init -input=false -reconfigure
+        run: terraform init -input=false -reconfigure
 
-      - name: Terraform validate
+      - name: Terraform Validate
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: |
-          terraform validate
+        run: terraform validate
 
-      - name: Terraform plan
+      - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: |
-          terraform plan -input=false -no-color
+        run: terraform plan -input=false -no-color
 
-      - name: Terraform apply
+      - name: Terraform Apply
         if: github.event_name != 'pull_request'
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: |
-          terraform apply -input=false -auto-approve
+        run: terraform apply -input=false -auto-approve
 
 
   # ============================================================
   # KUBERNETES / EKS
   # ============================================================
   kubernetes:
-    name: Deploy application and observability
-
+    name: Deploy Services & Observability
     needs: terraform
-
     if: github.event_name != 'pull_request'
-
     runs-on: ubuntu-latest
-
     environment: production
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      # --------------------------------------------------------
-      # AWS OIDC
-      # --------------------------------------------------------
-      - name: Configure AWS credentials with OIDC
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           audience: sts.amazonaws.com
 
-      # --------------------------------------------------------
-      # Helm
-      # --------------------------------------------------------
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Setup Helm
         uses: azure/setup-helm@v4
 
-      # --------------------------------------------------------
-      # Configure kubectl
-      # --------------------------------------------------------
       - name: Configure kubectl for EKS
         run: |
           aws eks update-kubeconfig \
             --region "$AWS_REGION" \
             --name "$EKS_CLUSTER_NAME"
 
-      # --------------------------------------------------------
-      # Verify EKS
-      # --------------------------------------------------------
-      - name: Verify cluster access
+      - name: Verify Cluster Access
+        run: kubectl get nodes
+
+      - name: Ensure ECR Repositories Exist
         run: |
-          kubectl get nodes
+          for repo in securecloud/auth-service securecloud/resource-service; do
+            aws ecr describe-repositories --repository-names "$repo" >/dev/null 2>&1 || \
+            aws ecr create-repository --repository-name "$repo"
+          done
 
-      # --------------------------------------------------------
-      # Create ECR repositories if they don't exist
-      # --------------------------------------------------------
-      - name: Create ECR repositories
-        run: |
-          aws ecr describe-repositories \
-            --repository-names securecloud/auth-service \
-            >/dev/null 2>&1 || \
-          aws ecr create-repository \
-            --repository-name securecloud/auth-service
-
-          aws ecr describe-repositories \
-            --repository-names securecloud/resource-service \
-            >/dev/null 2>&1 || \
-          aws ecr create-repository \
-            --repository-name securecloud/resource-service
-
-      # --------------------------------------------------------
-      # Login to Amazon ECR
-      # --------------------------------------------------------
-      - name: Login to ECR
+      - name: Login to Amazon ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # --------------------------------------------------------
-      # Build and push Docker images
-      # --------------------------------------------------------
-      - name: Build and push service images
+      - name: Build and Push Auth Service Image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/auth-service
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/securecloud/auth-service:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and Push Resource Service Image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/resource-service
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/securecloud/resource-service:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy Application Helm Chart
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
-
-        run: |
-          docker build \
-            -t "$REGISTRY/securecloud/auth-service:$IMAGE_TAG" \
-            services/auth-service
-
-          docker push \
-            "$REGISTRY/securecloud/auth-service:$IMAGE_TAG"
-
-          docker build \
-            -t "$REGISTRY/securecloud/resource-service:$IMAGE_TAG" \
-            services/resource-service
-
-          docker push \
-            "$REGISTRY/securecloud/resource-service:$IMAGE_TAG"
-
-      # --------------------------------------------------------
-      # Deploy application
-      # --------------------------------------------------------
-      - name: Deploy application chart
-        env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-
         run: |
           helm upgrade --install securecloud-release ./helm/securecloud \
             --namespace securecloud \
@@ -218,16 +164,10 @@ jobs:
             --wait \
             --timeout 10m
 
-      # --------------------------------------------------------
-      # Install Prometheus / Grafana
-      # --------------------------------------------------------
-      - name: Install observability chart
+      - name: Install Prometheus & Grafana
         run: |
-          helm repo add prometheus-community \
-            https://prometheus-community.github.io/helm-charts
-
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo update
-
           helm upgrade --install monitoring \
             prometheus-community/kube-prometheus-stack \
             --namespace monitoring \
@@ -236,26 +176,12 @@ jobs:
             --wait \
             --timeout 10m
 
-      # --------------------------------------------------------
-      # Apply monitoring resources
-      # --------------------------------------------------------
-      - name: Apply monitoring resources
+      - name: Apply Custom Monitoring Resources
         run: |
-          kubectl apply \
-            -f monitoring/securecloud-servicemonitor.yaml
+          kubectl apply -f monitoring/securecloud-servicemonitor.yaml
+          kubectl apply -f monitoring/securecloud-prometheusrule.yaml
 
-          kubectl apply \
-            -f monitoring/securecloud-prometheusrule.yaml
-
-      # --------------------------------------------------------
-      # Verify deployments
-      # --------------------------------------------------------
-      - name: Verify rollouts
+      - name: Verify Deployment Rollouts
         run: |
-          kubectl rollout status deployment \
-            --namespace securecloud \
-            --timeout=5m
-
-          kubectl get pods \
-            --namespace monitoring
-
+          kubectl rollout status deployment --namespace securecloud --timeout=5m
+          kubectl get pods --namespace monitoring
