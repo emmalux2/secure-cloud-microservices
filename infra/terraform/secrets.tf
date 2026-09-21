@@ -1,12 +1,20 @@
 # ============================================================
-# EXISTING JWT SECRET
+# JWT SECRET
 # ============================================================
-# The secret already exists in AWS Secrets Manager.
-# Terraform only reads the existing secret.
-# Terraform will NOT create or delete this secret.
+# Terraform creates and manages this secret.
+# terraform destroy will delete the secret as well.
+#
+# IMPORTANT:
+# The actual JWT secret value should be supplied separately.
+# Do not hard-code the secret value in this file.
 
-data "aws_secretsmanager_secret" "jwt_access" {
-  name = "secure-cloud/jwt-access-secret"
+resource "aws_secretsmanager_secret" "jwt_access" {
+  name        = "secure-cloud/jwt-access-secret"
+  description = "JWT access secret for Secure Cloud microservices"
+
+  tags = {
+    Project = "secure-cloud-microservices"
+  }
 }
 
 
@@ -50,11 +58,9 @@ resource "aws_iam_role" "auth_service_irsa" {
 # ALLOW AUTH SERVICE TO READ JWT SECRET
 # ============================================================
 # The auth service can retrieve the secret value from
-# AWS Secrets Manager.
+# AWS Secrets Manager through its Kubernetes IRSA role.
 #
-# Terraform does NOT manage the secret itself.
-# Terraform only manages the IAM permission that allows
-# the auth service to read it.
+# Terraform manages the secret AND the IAM permission.
 
 resource "aws_iam_role_policy" "auth_service_secrets_access" {
   name = "auth-service-secrets-read"
@@ -73,7 +79,7 @@ resource "aws_iam_role_policy" "auth_service_secrets_access" {
         ]
 
         Resource = [
-          data.aws_secretsmanager_secret.jwt_access.arn
+          aws_secretsmanager_secret.jwt_access.arn
         ]
       }
     ]
