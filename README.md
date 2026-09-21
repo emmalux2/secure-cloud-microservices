@@ -1,7 +1,7 @@
 WEEK 1
 SecureCloud — Microservices Architecture
 
-A microservices project showing how to build, secure, andd containerize a modern cloud application.
+A microservices project showing how to build, secure, andd containerize a modern cloud application
 
 ---
 

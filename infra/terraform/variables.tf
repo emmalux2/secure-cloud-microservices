@@ -1,9 +1,15 @@
 variable "aws_region" {
-  type    = string
-  default = "us-east-1"
+  description = "AWS region to deploy resources"
+  type        = string
+  default     = "us-east-1"
 }
 
-variable "image_tag" {
-  type    = string
-  default = "latest"
+variable "vpc_id" {
+  description = "VPC ID for the EKS cluster"
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs for the EKS cluster"
+  type        = list(string)
 }
