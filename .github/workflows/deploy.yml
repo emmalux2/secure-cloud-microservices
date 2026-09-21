@@ -58,78 +58,58 @@ jobs:
 
           terraform init -input=false -reconfigure
 
-      - name: Terraform Validate
-        working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform validate
-
-      - name: Terraform Plan
-        working-directory: ${{ env.TF_WORKING_DIR }}
-        run: |
-          terraform plan \
-            -input=false \
-            -no-color \
-            -var="vpc_id=vpc-062ae603ac69a0a32" \
-            -var='subnet_ids=["subnet-007878247c2f3f7ee","subnet-0a9506447dcd192a6","subnet-05524f16692fea896","subnet-0bd3ef3772800d812"]'
-
-      - name: Terraform Apply
+      # ============================================================
+      # TEMPORARY INSPECTION STAGE
+      # ============================================================
+      - name: Show Terraform State & AWS Resources
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          terraform apply \
-            -input=false \
-            -auto-approve \
-            -var="vpc_id=vpc-062ae603ac69a0a32" \
-            -var='subnet_ids=["subnet-007878247c2f3f7ee","subnet-0a9506447dcd192a6","subnet-05524f16692fea896","subnet-0bd3ef3772800d812"]'
+          echo "=============================================="
+          echo "TERRAFORM STATE"
+          echo "=============================================="
+          terraform state list || true
 
+          echo ""
+          echo "=============================================="
+          echo "AWS IDENTITY"
+          echo "=============================================="
+          aws sts get-caller-identity
 
-  kubernetes:
-    name: Deploy Services
-    needs: terraform
-    runs-on: ubuntu-latest
-    environment: production
+          echo ""
+          echo "=============================================="
+          echo "EKS CLUSTERS"
+          echo "=============================================="
+          aws eks list-clusters \
+            --region "$AWS_REGION"
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          audience: sts.amazonaws.com
-
-      - name: Verify AWS Identity
-        run: aws sts get-caller-identity
-
-      - name: Login to ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Setup Helm
-        uses: azure/setup-helm@v4
-
-      - name: Build, Push & Deploy
-        env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          TAG: ${{ github.sha }}
-        run: |
-          aws eks update-kubeconfig \
+          echo ""
+          echo "=============================================="
+          echo "NAT GATEWAYS"
+          echo "=============================================="
+          aws ec2 describe-nat-gateways \
             --region "$AWS_REGION" \
-            --name "$EKS_CLUSTER_NAME"
+            --filter Name=state,Values=pending,available \
+            --query 'NatGateways[*].[NatGatewayId,State,SubnetId]' \
+            --output table
 
-          docker build \
-            -t "$REGISTRY/securecloud/auth-service:$TAG" \
-            services/auth-service
+          echo ""
+          echo "=============================================="
+          echo "ELASTIC IP ADDRESSES"
+          echo "=============================================="
+          aws ec2 describe-addresses \
+            --region "$AWS_REGION" \
+            --query 'Addresses[*].[AllocationId,PublicIp,AssociationId]' \
+            --output table
 
-          docker build \
-            -t "$REGISTRY/securecloud/resource-service:$TAG" \
-            services/resource-service
+          echo ""
+          echo "=============================================="
+          echo "ECR REPOSITORIES"
+          echo "=============================================="
+          aws ecr describe-repositories \
+            --region "$AWS_REGION" \
+            --query 'repositories[*].repositoryName' \
+            --output table
 
-          docker push "$REGISTRY/securecloud/auth-service:$TAG"
-          docker push "$REGISTRY/securecloud/resource-service:$TAG"
+          echo ""
+          echo "===================================
 
-          helm upgrade --install securecloud ./helm/securecloud \
-            --namespace securecloud \
-            --create-namespace \
-            --set authService.image="$REGISTRY/securecloud/auth-service:$TAG" \
-            --set resourceService.image="$REGISTRY/securecloud/resource-service:$TAG"
