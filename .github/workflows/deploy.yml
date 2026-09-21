@@ -55,11 +55,11 @@ jobs:
 
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform plan -input=false -no-color
+        run: terraform plan -input=false -no-color -var="vpc_id=vpc-062ae603ac69a0a32" -var="subnet_ids=[\"subnet-007878247c2f3f7ee\", \"subnet-0a9506447dcd192a6\", \"subnet-05524f16692fea896\", \"subnet-0bd3ef3772800d812\"]"
 
       - name: Terraform Apply
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform apply -input=false -auto-approve
+        run: terraform apply -input=false -auto-approve -var="vpc_id=vpc-062ae603ac69a0a32" -var="subnet_ids=[\"subnet-007878247c2f3f7ee\", \"subnet-0a9506447dcd192a6\", \"subnet-05524f16692fea896\", \"subnet-0bd3ef3772800d812\"]"
 
   kubernetes:
     name: Deploy Services
