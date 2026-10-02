@@ -85,3 +85,10 @@ jobs:
       - name: Verify Cluster Nodes
         run: |
           kubectl get nodes
+
+      - name: Deploy Helm Chart
+        working-directory: ${{ github.workspace }}
+        run: |
+          helm upgrade --install securecloud-release ./helm/securecloud \
+            --namespace default \
+            --set image.tag=${{ github.sha }}
