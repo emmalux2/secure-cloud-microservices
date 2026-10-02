@@ -5,15 +5,15 @@ module "eks" {
   cluster_name    = "secure-cloud-cluster-v2"
   cluster_version = "1.34"
 
-  vpc_id     = var.vpc_id
-  subnet_ids = var.subnet_ids
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnets
 
   eks_managed_node_groups = {
     default = {
-      desired_capacity = 2
-      min_capacity     = 2
-      max_capacity     = 4
-      instance_types   = ["t3.medium"]
+      desired_size   = 2
+      min_size       = 2
+      max_size       = 4
+      instance_types = ["t3.medium"]
     }
   }
 }

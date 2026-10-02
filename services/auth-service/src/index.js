@@ -19,10 +19,21 @@ const httpRequests = new client.Counter({
   help: "Total HTTP requests",
   labelNames: ["route", "status"]
 });
+const httpRequestDuration = new client.Histogram({
+  name: "http_request_duration_seconds",
+  help: "HTTP request duration in seconds",
+  labelNames: ["route", "method", "status"],
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5]
+});
 
 app.use((req, res, next) => {
+  const endTimer = httpRequestDuration.startTimer();
   res.on("finish", () => {
-    httpRequests.inc({ route: req.path, status: res.statusCode });
+    const route = req.route
+      ? `${req.baseUrl}${req.route.path}`.replace(/\/+$/, "") || "/"
+      : "unmatched";
+    httpRequests.inc({ route, status: res.statusCode });
+    endTimer({ route, method: req.method, status: res.statusCode });
   });
   next();
 });

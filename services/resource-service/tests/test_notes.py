@@ -21,3 +21,10 @@ def test_invalid_token_returns_401():
         'Authorization': 'Bearer invalid.jwt.token'
     })  # Update to '/api/notes' if defined with /api prefix
     assert response.status_code == 401
+
+def test_metrics_endpoint_exposes_http_metrics():
+    client.get('/healthz')
+    response = client.get('/metrics')
+
+    assert response.status_code == 200
+    assert 'http_requests_total' in response.text

@@ -2,6 +2,7 @@ import os
 import jwt
 from fastapi import FastAPI, Depends, Header, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from prometheus_fastapi_instrumentator import Instrumentator
 
 app = FastAPI(title="SecureCloud Resource Service")
 
@@ -89,3 +90,5 @@ def get_admin_panel(current_user: dict = Depends(RoleChecker(["admin"]))):
         "user": current_user,
         "admin_metrics": {"system_health": "100%", "active_sessions": 42}
     }
+
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
