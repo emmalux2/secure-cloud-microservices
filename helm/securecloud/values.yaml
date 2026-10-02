@@ -1,4 +1,4 @@
-imagePullPolicy: IfNotPresent
+imagePullPolicy: Always
 
 gateway:
   image: nginxinc/nginx-unprivileged:1.27-alpine
@@ -12,7 +12,7 @@ gateway:
       memory: 64Mi
 
 authService:
-  image: securecloud/auth-service:latest
+  image: 797776210271.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest
   replicas: 1
   port: 4000
   resources:
@@ -24,7 +24,7 @@ authService:
       memory: 256Mi
 
 resourceService:
-  image: securecloud/resource-service:latest
+  image: 797776210271.dkr.ecr.us-east-1.amazonaws.com/resource-service:latest
   replicas: 1
   port: 8000
   resources:
@@ -68,5 +68,6 @@ grafana:
     limits:
       cpu: 500m
       memory: 512Mi
+
 prometheus:
-    enabled: true
+  enabled: true
