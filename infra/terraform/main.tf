@@ -16,3 +16,13 @@ terraform {
 provider "aws" {
   region = var.aws_region
 }
+
+import {
+  to = aws_cloudwatch_log_group.waf_log_group
+  id = "aws-waf-logs-main"
+}
+
+import {
+  to = module.eks.aws_cloudwatch_log_group.this[0]
+  id = "/aws/eks/secure-cloud-cluster-v2/cluster"
+}
