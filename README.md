@@ -5,7 +5,7 @@ A microservices project showing how to build, secure, andd containerize a modern
 
 ---
 
-What is Built in Week 1??
+What is Built in Week One??
 
 * auth-service: Node.js and Express application handling identity management and server health checks.
 * postgres-db: Relational database storing user records and hashed session tokens with persistent Docker volume storage.
