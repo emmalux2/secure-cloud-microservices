@@ -1,9 +1,70 @@
 {
-  "title": "SecureCloud Security Overview",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
   "panels": [
-    { "title": "Failed logins / min", "type": "timeseries", "targets": [{ "expr": "rate(http_requests_total{route=\"/auth/login\",status=\"401\"}[1m])" }] },
-    { "title": "5xx error rate", "type": "timeseries", "targets": [{ "expr": "rate(http_requests_total{status=~\"5..\"}[1m])" }] },
-    { "title": "Request latency p95", "type": "timeseries", "targets": [{ "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))" }] },
-    { "title": "Pod restarts", "type": "stat", "targets": [{ "expr": "sum(kube_pod_container_status_restarts_total{namespace=\"secure-cloud\"})" }] }
-  ]
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{route=\"/auth/login\",status=\"401\"}[1m])) * 60", "refId": "A" }
+      ],
+      "title": "Failed logins per minute",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m]))", "refId": "A" }
+      ],
+      "title": "5xx errors per second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))", "refId": "A" }
+      ],
+      "title": "Request latency p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "targets": [
+        { "expr": "sum(kube_pod_container_status_restarts_total{namespace=\"securecloud\"})", "refId": "A" }
+      ],
+      "title": "Pod restarts",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["securecloud", "security"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "SecureCloud Security Overview",
+  "uid": "securecloud-security",
+  "version": 1
 }

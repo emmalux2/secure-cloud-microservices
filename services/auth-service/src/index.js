@@ -25,13 +25,21 @@ const httpRequestDuration = new client.Histogram({
   labelNames: ["route", "method", "status"],
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5]
 });
+const metricRoutes = new Set([
+  "/",
+  "/healthz",
+  "/metrics",
+  "/auth/register",
+  "/auth/login",
+  "/auth/refresh",
+  "/auth/logout"
+]);
 
 app.use((req, res, next) => {
   const endTimer = httpRequestDuration.startTimer();
   res.on("finish", () => {
-    const route = req.route
-      ? `${req.baseUrl}${req.route.path}`.replace(/\/+$/, "") || "/"
-      : "unmatched";
+    const requestPath = req.originalUrl.split("?")[0];
+    const route = metricRoutes.has(requestPath) ? requestPath : "unmatched";
     httpRequests.inc({ route, status: res.statusCode });
     endTimer({ route, method: req.method, status: res.statusCode });
   });

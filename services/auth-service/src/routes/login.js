@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const pool = require("../db");
 const { signAccessToken, signRefreshToken } = require("../utils/jwt");
+const { storeRefreshToken } = require("../utils/refreshTokens");
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ router.post("/", async (req, res) => {
 
   const accessToken = signAccessToken({ sub: user.id, email: user.email, role: user.role });
   const refreshToken = signRefreshToken({ sub: user.id, email: user.email, role: user.role });
+  await storeRefreshToken(pool, user.id, refreshToken);
 
   res.cookie("refresh_token", refreshToken, {
     httpOnly: true,

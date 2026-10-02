@@ -22,11 +22,16 @@ describe('Auth Service Security Suite', () => {
 
   it('should expose bounded route labels and request latency metrics', async () => {
     await request(app).get('/healthz');
+    await request(app).post('/auth/login').send({
+      email: 'nobody@example.com',
+      password: 'invalid-password-123'
+    });
     const res = await request(app).get('/metrics');
 
     expect(res.statusCode).toBe(200);
     expect(res.text).toContain('http_request_duration_seconds_bucket');
     expect(res.text).toContain('route="/healthz"');
+    expect(res.text).toContain('route="/auth/login",status="401"');
   });
 
   it('should reject registration with weak passwords (<12 chars)', async () => {

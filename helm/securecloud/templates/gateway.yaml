@@ -1,0 +1,100 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "securecloud.fullname" . }}-gateway
+  labels:
+    app: api-gateway
+data:
+  default.conf: |
+    upstream auth_backend {
+      server auth-service:4000;
+    }
+
+    upstream resource_backend {
+      server resource-service:8000;
+    }
+
+    server {
+      listen {{ .Values.gateway.port }};
+
+      location /healthz {
+        access_log off;
+        return 200 "ok\n";
+      }
+
+      location /auth/ {
+        proxy_pass http://auth_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+      }
+
+      location /api/ {
+        proxy_set_header Authorization $http_authorization;
+        proxy_pass http://resource_backend/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  labels:
+    app: api-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: {{ .Values.gateway.image | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.port }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "{{ .Values.gateway.resources.requests.cpu }}"
+              memory: "{{ .Values.gateway.resources.requests.memory }}"
+            limits:
+              cpu: "{{ .Values.gateway.resources.limits.cpu }}"
+              memory: "{{ .Values.gateway.resources.limits.memory }}"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: {{ include "securecloud.fullname" . }}-gateway
+        - name: tmp
+          emptyDir: {}

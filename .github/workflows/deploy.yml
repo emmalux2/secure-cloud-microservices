@@ -92,6 +92,12 @@ jobs:
       - name: Deploy Helm Chart
         working-directory: ${{ github.workspace }}
         run: |
-          helm upgrade --install securecloud-release ./helm/securecloud \
+          chart_path="$GITHUB_WORKSPACE/helm/securecloud"
+          test -f "$chart_path/Chart.yaml" || {
+            echo "Helm chart not found: $chart_path/Chart.yaml"
+            exit 1
+          }
+
+          helm upgrade --install securecloud-release "$chart_path" \
             --namespace default \
             --set image.tag=${{ github.sha }}

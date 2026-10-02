@@ -1,0 +1,35 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: securecloud-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: securecloud-security
+      rules:
+        - alert: HighFailedLoginRate
+          expr: sum(rate(http_requests_total{route="/auth/login",status="401"}[5m])) > 5
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Possible brute-force attack on auth-service
+            description: More than five failed logins per second for two minutes.
+        - alert: HighErrorRate
+          expr: sum(rate(http_requests_total{status=~"5.."}[5m])) > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Elevated 5xx error rate
+            description: Services are returning more than one server error per second.
+        - alert: PodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total{namespace="securecloud"}[15m]) > 3
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: SecureCloud pod is crash-looping
+            description: A container in the securecloud namespace restarted more than three times in 15 minutes.

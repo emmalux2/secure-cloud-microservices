@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  labels:
+    app: auth-service
+spec:
+  replicas: {{ .Values.authService.replicas }}
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: {{ .Values.authService.port | quote }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: auth-service
+          image: {{ .Values.authService.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.authService.port }}
+          envFrom:
+            - secretRef:
+                name: {{ include "securecloud.fullname" . }}-auth
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "{{ .Values.authService.resources.requests.cpu }}"
+              memory: "{{ .Values.authService.resources.requests.memory }}"
+            limits:
+              cpu: "{{ .Values.authService.resources.limits.cpu }}"
+              memory: "{{ .Values.authService.resources.limits.memory }}"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resource-service
+  labels:
+    app: resource-service
+spec:
+  replicas: {{ .Values.resourceService.replicas }}
+  selector:
+    matchLabels:
+      app: resource-service
+  template:
+    metadata:
+      labels:
+        app: resource-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: {{ .Values.resourceService.port | quote }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: resource-service
+          image: {{ .Values.resourceService.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.resourceService.port }}
+          envFrom:
+            - secretRef:
+                name: {{ include "securecloud.fullname" . }}-resource
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "{{ .Values.resourceService.resources.requests.cpu }}"
+              memory: "{{ .Values.resourceService.resources.requests.memory }}"
+            limits:
+              cpu: "{{ .Values.resourceService.resources.limits.cpu }}"
+              memory: "{{ .Values.resourceService.resources.limits.memory }}"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http

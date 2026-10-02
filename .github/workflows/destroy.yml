@@ -1,25 +1,12 @@
-name: Deploy Infrastructure and Kubernetes
+name: Destroy SecureCloud (Manual)
 
 on:
-  pull_request:
-    paths:
-      - "infra/terraform/**"
-      - "helm/**"
-      - "monitoring/**"
-      - "services/**"
-      - ".github/workflows/deploy.yml"
-
-  push:
-    branches:
-      - main
-    paths:
-      - "infra/terraform/**"
-      - "helm/**"
-      - "monitoring/**"
-      - "services/**"
-      - ".github/workflows/deploy.yml"
-
   workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: Type DESTROY to remove EKS infrastructure and ECR images
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -27,7 +14,6 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  EKS_CLUSTER_NAME: secure-cloud-cluster-v2
   TF_WORKING_DIR: infra/terraform
 
 concurrency:
@@ -40,19 +26,22 @@ jobs:
   # TERRAFORM
   # ============================================================
   terraform:
-    name: Infrastructure (Terraform)
+    name: Destroy infrastructure
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'pull_request' && 'plan' || 'production' }}
+    environment: production
 
     steps:
+      - name: Require explicit destroy confirmation
+        env:
+          CONFIRM_DESTROY: ${{ inputs.confirm_destroy }}
+        run: |
+          if [ "$CONFIRM_DESTROY" != "DESTROY" ]; then
+            echo "Type DESTROY in the workflow input to continue."
+            exit 1
+          fi
+
       - name: Checkout Repository
         uses: actions/checkout@v4
-      - name: Debug OIDC Token and Role ARN
-        run: |
-          echo "Target Role ARN: '${{ vars.AWS_ROLE_ARN }}'"
-          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-          echo "--- DECODED OIDC TOKEN ---"
-          jq -R 'split(".") | .[1] | @base64d | fromjson' <<< "$OIDC_TOKEN"
 
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -83,111 +72,16 @@ jobs:
 
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform plan -input=false -no-color
+        run: terraform plan -destroy -input=false -out=destroy.tfplan
 
       - name: Terraform Apply
-        if: github.event_name != 'pull_request'
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform apply -input=false -auto-approve
+        run: terraform apply -input=false -auto-approve destroy.tfplan
 
-
-  # ============================================================
-  # KUBERNETES / EKS
-  # ============================================================
-  kubernetes:
-    name: Deploy Services & Observability
-    needs: terraform
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          audience: sts.amazonaws.com
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Setup Helm
-        uses: azure/setup-helm@v4
-
-      - name: Configure kubectl for EKS
-        run: |
-          aws eks update-kubeconfig \
-            --region "$AWS_REGION" \
-            --name "$EKS_CLUSTER_NAME"
-
-      - name: Verify Cluster Access
-        run: kubectl get nodes
-
-      - name: Ensure ECR Repositories Exist
+      - name: Remove application ECR repositories
         run: |
           for repo in securecloud/auth-service securecloud/resource-service; do
-            aws ecr describe-repositories --repository-names "$repo" >/dev/null 2>&1 || \
-            aws ecr create-repository --repository-name "$repo"
+            if aws ecr describe-repositories --repository-names "$repo" >/dev/null 2>&1; then
+              aws ecr delete-repository --repository-name "$repo" --force
+            fi
           done
-
-      - name: Login to Amazon ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and Push Auth Service Image
-        uses: docker/build-push-action@v5
-        with:
-          context: services/auth-service
-          push: true
-          tags: ${{ steps.ecr.outputs.registry }}/securecloud/auth-service:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and Push Resource Service Image
-        uses: docker/build-push-action@v5
-        with:
-          context: services/resource-service
-          push: true
-          tags: ${{ steps.ecr.outputs.registry }}/securecloud/resource-service:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Deploy Application Helm Chart
-        env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          helm upgrade --install securecloud-release ./helm/securecloud \
-            --namespace securecloud \
-            --create-namespace \
-            --set imagePullPolicy=Always \
-            --set authService.image="$REGISTRY/securecloud/auth-service:$IMAGE_TAG" \
-            --set resourceService.image="$REGISTRY/securecloud/resource-service:$IMAGE_TAG" \
-            --wait \
-            --timeout 10m
-
-      - name: Install Prometheus & Grafana
-        run: |
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-          helm repo update
-          helm upgrade --install monitoring \
-            prometheus-community/kube-prometheus-stack \
-            --namespace monitoring \
-            --create-namespace \
-            --values monitoring/kube-prometheus-stack-values.yaml \
-            --wait \
-            --timeout 10m
-
-      - name: Apply Custom Monitoring Resources
-        run: |
-          kubectl apply -f monitoring/securecloud-servicemonitor.yaml
-          kubectl apply -f monitoring/securecloud-prometheusrule.yaml
-
-      - name: Verify Deployment Rollouts
-        run: |
-          kubectl rollout status deployment --namespace securecloud --timeout=5m
-          kubectl get pods --namespace monitoring
