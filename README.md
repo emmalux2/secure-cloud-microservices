@@ -70,7 +70,7 @@ What Was Implemented
 
 •	Brute-Force Defense: Enforced IP-based rate limiting on login attempts and hashed passwords with bcrypt (cost factor 12).
 
-API Endpoints Built
+API Endpoints was Built
 1.	Register User
 POST /auth/register
 Validates inputs using Zod, hashes the password, and creates a new user record in PostgreSQL.

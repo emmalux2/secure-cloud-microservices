@@ -54,3 +54,17 @@ redis:
     limits:
       cpu: 100m
       memory: 64Mi
+
+grafana:
+  image: grafana/grafana:latest
+  replicas: 1
+  port: 3000
+  adminUser: admin
+  adminPassword: secure-grafana-password-123
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
