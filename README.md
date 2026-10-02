@@ -7,7 +7,7 @@ A microservices project showing how to build, secure, andd containerize a modern
 
 What is Built in Week One??
 
-* auth-service: Node.js and Express application handling identity management and server health checks.
+* auth-service: Node.js and Express application handling identity management and server health checks check.
 * postgres-db: Relational database storing user records and hashed session tokens with persistent Docker volume storage.
 * Private Bridge Network: Isolated Docker container network that lets microservices communicate securely without exposing database ports to the outside world.
 
