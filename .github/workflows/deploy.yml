@@ -89,6 +89,9 @@ jobs:
       - name: Setup Helm
         uses: azure/setup-helm@v4
 
+      - name: Update Helm Dependencies
+        run: helm dependency update ./helm/securecloud
+
       - name: Deploy Helm Chart
         working-directory: ${{ github.workspace }}
         run: |
@@ -99,5 +102,6 @@ jobs:
           }
 
           helm upgrade --install securecloud-release "$chart_path" \
-            --namespace default \
+            --namespace securecloud \
+            --create-namespace \
             --set image.tag=${{ github.sha }}
