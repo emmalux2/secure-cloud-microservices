@@ -109,7 +109,3 @@ jobs:
             --region "$AWS_REGION" \
             --query 'repositories[*].repositoryName' \
             --output table
-
-          echo ""
-          echo "===================================
-
