@@ -68,3 +68,5 @@ grafana:
     limits:
       cpu: 500m
       memory: 512Mi
+prometheus:
+    enabled: true
