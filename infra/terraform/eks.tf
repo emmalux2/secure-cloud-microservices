@@ -2,16 +2,13 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "20.24.0"
 
-  cluster_name    = "secure-cloud-cluster-v2"
-  cluster_version = "1.34"
+  cluster_name                   = "secure-cloud-cluster-v2"
+  cluster_version                = "1.34"
+  cluster_endpoint_public_access  = true
+  cluster_endpoint_private_access = true
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
-
-  # Enable both public and private endpoint access so CI/CD can reach the cluster
-  cluster_endpoint_public_access  = true
-  cluster_endpoint_private_access = true
-  cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
 
   eks_managed_node_groups = {
     default = {
