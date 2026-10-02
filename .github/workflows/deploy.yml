@@ -86,6 +86,9 @@ jobs:
         run: |
           kubectl get nodes
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
       - name: Deploy Helm Chart
         working-directory: ${{ github.workspace }}
         run: |
