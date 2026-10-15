@@ -3,6 +3,8 @@ imagePullPolicy: Always
 gateway:
   image: nginxinc/nginx-unprivileged:1.27-alpine
   port: 8080
+  wafAclArn: ""
+  disposablePublicHttp: false
   resources:
     requests:
       cpu: 25m
@@ -15,6 +17,9 @@ authService:
   image: 797776210271.dkr.ecr.us-east-1.amazonaws.com/auth-service:latest
   replicas: 1
   port: 4000
+  serviceAccount:
+    name: auth-service-sa
+    roleArn: ""
   resources:
     requests:
       cpu: 50m

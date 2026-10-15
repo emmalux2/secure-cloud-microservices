@@ -1,10 +1,22 @@
-node_modules/
-__pycache__/
-*.pyc
-*.tar
-.docker_temp_*
-cookies.txt
-.env
-.terraform/
+# --- Terraform Local Artifacts ---
 *.tfstate
 *.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# --- Terraform Plan Files ---
+*.tfplan
+*-floci*.tfplan
+
+# --- Backups & Local Overrides ---
+*.before-floci
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# --- IDE / OS Specific Files ---
+.DS_Store
+.vscode/
+.idea/

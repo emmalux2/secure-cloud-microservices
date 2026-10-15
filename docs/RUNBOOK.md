@@ -19,9 +19,13 @@ To stop AWS infrastructure after practice:
 
 The destroy workflow removes Terraform-managed infrastructure and the two application ECR repositories. It retains the S3 Terraform state bucket and the GitHub OIDC deployment role so a later deployment can recreate the environment. Destruction is irreversible for ephemeral PostgreSQL and Redis data.
 
+The application Ingress is disabled by default. For a disposable test only, run **Provision Infrastructure (Terraform)** with `enable_disposable_public_http` enabled. This provisions an internet-facing HTTP-only ALB and applies the `main-waf` Web ACL; the workflow verifies the association. Do not use this mode for real authentication traffic because it has no TLS. Run the workflow again with the input disabled to remove the test Ingress and its ALB.
+
 ## Practice Deployment
 
 The practice Helm release uses a single ephemeral PostgreSQL pod, Redis without persistence, and internal ClusterIP services. Data is lost if those pods are recreated. No cloud load balancer is created.
+
+The Floci Terraform root is for LocalStack practice only. LocalStack's EKS API currently does not support EKS access entries, `AssociateEncryptionConfig`, or cluster logging updates, and omits the cluster OIDC issuer and logging state from its responses. Accordingly, that root disables EKS access-entry administration and auth-service IRSA, and does not manage EKS encryption configuration or cluster logging. The production AWS Terraform root retains the GitHub Actions cluster-admin access entry, auth-service IRSA trust configuration, EKS encryption, and cluster logging.
 
 Forward the API gateway to localhost:
 

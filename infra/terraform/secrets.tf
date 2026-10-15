@@ -39,6 +39,21 @@ data "aws_iam_policy_document" "auth_service_trust" {
         module.eks.oidc_provider_arn
       ]
     }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:sub"
+      values = [
+        "system:serviceaccount:securecloud:auth-service-sa",
+        "system:serviceaccount:secure-cloud:auth-service-sa",
+      ]
+    }
   }
 }
 

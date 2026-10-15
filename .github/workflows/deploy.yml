@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      enable_disposable_public_http:
+        description: Expose the test ALB over plain HTTP (no TLS)
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -92,10 +98,41 @@ jobs:
       - name: Update Helm Dependencies
         run: helm dependency update ./helm/securecloud
 
+      - name: Install AWS Load Balancer Controller
+        run: |
+          controller_role_arn="$(terraform -chdir=infra/terraform output -raw aws_load_balancer_controller_role_arn)"
+          vpc_id="$(terraform -chdir=infra/terraform output -raw vpc_id)"
+          values_file="$RUNNER_TEMP/aws-load-balancer-controller-values.yaml"
+
+          cat > "$values_file" <<EOF
+          clusterName: $EKS_CLUSTER_NAME
+          region: $AWS_REGION
+          vpcId: $vpc_id
+          serviceAccount:
+            create: true
+            name: aws-load-balancer-controller
+            annotations:
+              eks.amazonaws.com/role-arn: "$controller_role_arn"
+          EOF
+
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo update eks
+          helm upgrade --install aws-load-balancer-controller \
+            eks/aws-load-balancer-controller \
+            --version 1.13.4 \
+            --namespace kube-system \
+            --values "$values_file"
+
+          kubectl rollout status deployment/aws-load-balancer-controller \
+            --namespace kube-system \
+            --timeout=5m
+
       - name: Deploy Helm Chart
         working-directory: ${{ github.workspace }}
         run: |
           chart_path="$GITHUB_WORKSPACE/helm/securecloud"
+          auth_service_role_arn="$(terraform -chdir=infra/terraform output -raw auth_service_role_arn)"
+          waf_web_acl_arn="$(terraform -chdir=infra/terraform output -raw waf_web_acl_arn)"
           test -f "$chart_path/Chart.yaml" || {
             echo "Helm chart not found: $chart_path/Chart.yaml"
             exit 1
@@ -104,4 +141,59 @@ jobs:
           helm upgrade --install securecloud-release "$chart_path" \
             --namespace securecloud \
             --create-namespace \
+            --set-string authService.serviceAccount.roleArn="$auth_service_role_arn" \
+            --set-string gateway.wafAclArn="$waf_web_acl_arn" \
+            --set gateway.disposablePublicHttp=${{ github.event_name == 'workflow_dispatch' && inputs.enable_disposable_public_http }} \
             --set image.tag=${{ github.sha }}
+
+      - name: Verify WAF association
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_disposable_public_http }}
+        run: |
+          alb_dns=""
+          for attempt in $(seq 1 60); do
+            alb_dns="$(kubectl get ingress api-gateway \
+              --namespace securecloud \
+              --output=jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+            if [ -n "$alb_dns" ]; then
+              break
+            fi
+            sleep 10
+          done
+
+          if [ -z "$alb_dns" ]; then
+            echo "The api-gateway Ingress did not receive an ALB hostname." >&2
+            kubectl describe ingress api-gateway --namespace securecloud >&2
+            exit 1
+          fi
+
+          alb_arn="$(aws elbv2 describe-load-balancers \
+            --region "$AWS_REGION" \
+            --query "LoadBalancers[?DNSName=='$alb_dns'].LoadBalancerArn | [0]" \
+            --output text)"
+          if [ -z "$alb_arn" ] || [ "$alb_arn" = "None" ]; then
+            echo "Could not resolve ALB ARN for hostname $alb_dns." >&2
+            exit 1
+          fi
+
+          expected_waf_arn="$(terraform -chdir=infra/terraform output -raw waf_web_acl_arn)"
+          actual_waf_arn=""
+
+          for attempt in $(seq 1 12); do
+            if actual_waf_arn="$(aws wafv2 get-web-acl-for-resource \
+              --region "$AWS_REGION" \
+              --resource-arn "$alb_arn" \
+              --query 'WebACL.ARN' \
+              --output text 2>&1)"; then
+              if [ "$actual_waf_arn" = "$expected_waf_arn" ]; then
+                break
+              fi
+            else
+              echo "$actual_waf_arn" >&2
+            fi
+            sleep 10
+          done
+
+          if [ "$actual_waf_arn" != "$expected_waf_arn" ]; then
+            echo "Expected WAF $expected_waf_arn on ALB $alb_arn, got: $actual_waf_arn" >&2
+            exit 1
+          fi
